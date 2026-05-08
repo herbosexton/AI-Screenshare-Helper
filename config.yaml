@@ -1,0 +1,32 @@
+ai:
+  provider: "anthropic"
+  model: "claude-sonnet-4-6"
+  fallback_provider: "openai"
+  fallback_model: "gpt-4o"
+
+capture:
+  mode: "manual"
+  auto_interval_seconds: 5
+  monitors: "all"
+
+audio:
+  enabled: true
+  system_audio: true
+  microphone: true
+  transcription_model: "base"
+  buffer_seconds: 30
+
+output:
+  mode: "all"
+  overlay_opacity: 0.85
+  overlay_position: "bottom_right"
+  target_monitor: 0
+  speech_rate: 175
+  speech_volume: 0.9
+  speech_voice: 0
+
+humanize:
+  enabled: true
+  style: "casual_technical"
+  imperfection_level: 0.3
+  code_style: "slightly_messy"
