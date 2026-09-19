@@ -103,6 +103,16 @@ _CLOUD_BRANCH_CORE = {
     "AWS": ("bedrock", "amazon bedrock"),
     "GCP": ("vertex", "vertex ai", "gemini"),
 }
+_CLOUD_CAPABILITY_MARKERS = (
+    "agentic",
+    "orchestration",
+    "deployment",
+    "design",
+    "foundation model",
+    "model evaluation",
+    "agent builder",
+    "custom training",
+)
 _CERT_NAMES = re.compile(
     r"(azure ai engineer associate|azure solutions architect expert|"
     r"aws certified[\w\s-]*|google professional[\w\s-]*|pmp|comptia[\w\s-]*)",
@@ -178,6 +188,7 @@ class CanonicalRequirement:
     subcomponents: list[str] = field(default_factory=list)
     alternatives: list[str] = field(default_factory=list)
     alternative_concepts: dict[str, list[str]] = field(default_factory=dict)
+    alternative_capabilities: dict[str, list[str]] = field(default_factory=dict)
     source_text: str = ""
     source_texts: list[str] = field(default_factory=list)
     source_section: str = ""
@@ -208,6 +219,15 @@ def cloud_branch_core_concepts(text: str, platform: str) -> list[str]:
     blob = normalize_text(text)
     found: list[str] = []
     for marker in _CLOUD_BRANCH_CORE.get(platform, ()):
+        if marker in blob and marker not in found:
+            found.append(marker)
+    return found
+
+
+def cloud_branch_capability_concepts(text: str) -> list[str]:
+    blob = normalize_text(text)
+    found: list[str] = []
+    for marker in _CLOUD_CAPABILITY_MARKERS:
         if marker in blob and marker not in found:
             found.append(marker)
     return found
@@ -443,6 +463,11 @@ def _from_raw(raw: dict[str, Any], index: int) -> CanonicalRequirement:
             for tech, label in (("azure", "Azure"), ("aws", "AWS"), ("gcp", "GCP"))
             if tech in techs
         }
+        req.alternative_capabilities = {
+            label: cloud_branch_capability_concepts(text)
+            for tech, label in (("azure", "Azure"), ("aws", "AWS"), ("gcp", "GCP"))
+            if tech in techs
+        }
     req.aliases = _aliases(req)
     return req
 
@@ -473,11 +498,14 @@ def _merge_cloud_group(items: list[dict[str, Any]], start_index: int) -> Canonic
         preferred=preferred,
     )
     branch_concepts: dict[str, list[str]] = {}
+    branch_caps: dict[str, list[str]] = {}
     for text in texts:
         for tech, label in (("azure", "Azure"), ("aws", "AWS"), ("gcp", "GCP")):
             if tech in extract_technologies(text) or re.search(rf"\b{tech}\b", text or "", re.I):
                 branch_concepts[label] = cloud_branch_core_concepts(text, label)
+                branch_caps[label] = cloud_branch_capability_concepts(text)
     req.alternative_concepts = branch_concepts
+    req.alternative_capabilities = branch_caps
     req.aliases = _aliases(req)
     return req
 
@@ -573,6 +601,11 @@ def canonicalize_requirements(raw_items: list[dict[str, Any]]) -> tuple[list[Can
                     for concept in cores:
                         if concept not in existing:
                             existing.append(concept)
+                for plat, caps in (extra.alternative_capabilities or {}).items():
+                    existing_caps = winner.alternative_capabilities.setdefault(plat, [])
+                    for concept in caps:
+                        if concept not in existing_caps:
+                            existing_caps.append(concept)
                 for field_name in extra.degree_fields:
                     if field_name not in winner.degree_fields:
                         winner.degree_fields.append(field_name)

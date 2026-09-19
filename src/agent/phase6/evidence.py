@@ -123,6 +123,12 @@ _CONCEPT_WEIGHTS = {
     "bedrock": 1.15,
     "vertex": 1.15,
     "gemini": 1.1,
+    "design": 0.9,
+    "deployment": 0.95,
+    "foundation model": 1.0,
+    "model evaluation": 1.0,
+    "agent builder": 1.1,
+    "custom training": 1.0,
 }
 
 _CONCEPT_ALIASES = {
@@ -166,6 +172,12 @@ _CONCEPT_ALIASES = {
     "bedrock": ("bedrock", "amazon bedrock"),
     "vertex": ("vertex", "vertex ai"),
     "gemini": ("gemini",),
+    "design": ("design", "designed"),
+    "deployment": ("deployment", "deployed", "deploy"),
+    "foundation model": ("foundation model", "foundation models"),
+    "model evaluation": ("model evaluation",),
+    "agent builder": ("agent builder",),
+    "custom training": ("custom training",),
 }
 
 _CATEGORY_SECTIONS = {
@@ -287,11 +299,20 @@ def _is_role_boundary(line: str, section: str) -> bool:
     return bool(re.match(r"^[A-Z0-9]", raw))
 
 
+def _is_date_only_line(line: str) -> bool:
+    raw = (line or "").strip()
+    if not _DATE_RANGE.search(raw):
+        return False
+    leftover = _DATE_RANGE.sub("", raw).strip(" \t|-–—,")
+    return len(leftover) <= 3
+
+
 def parse_resume(resume_text: str) -> ResumeProfile:
     text = (resume_text or "").replace("\xa0", " ")
     profile = ResumeProfile(text=text)
     section = ""
     current_dates: tuple[Optional[date], Optional[date]] = (None, None)
+    pending_dates: Optional[tuple[Optional[date], Optional[date]]] = None
     idx = 1
     for raw in text.splitlines():
         line = raw.strip()
@@ -311,12 +332,22 @@ def parse_resume(resume_text: str) -> ResumeProfile:
             elif "experience" in section or "employment" in section:
                 section = "experience"
             current_dates = (None, None)
+            pending_dates = None
             continue
         dm = _DATE_RANGE.search(line)
         if dm:
-            current_dates = (_parse_date_token(dm.group("a")), _parse_date_token(dm.group("b")))
+            parsed = (_parse_date_token(dm.group("a")), _parse_date_token(dm.group("b")))
+            current_dates = parsed
+            if _is_date_only_line(line):
+                pending_dates = parsed
+            else:
+                pending_dates = None
         elif _is_role_boundary(line, section):
-            current_dates = (None, None)
+            if pending_dates is not None:
+                current_dates = pending_dates
+                pending_dates = None
+            else:
+                current_dates = (None, None)
         if section == "education" or _DEGREE_LINE.search(line):
             level, fields = extract_degree(line)
             if level and not profile.degree_level:
@@ -383,6 +414,10 @@ def requirement_concepts(req: CanonicalRequirement) -> list[str]:
             concepts.append("engagement")
     for cores in (req.alternative_concepts or {}).values():
         for concept in cores:
+            if concept not in concepts:
+                concepts.append(concept)
+    for caps in (req.alternative_capabilities or {}).values():
+        for concept in caps:
             if concept not in concepts:
                 concepts.append(concept)
     return concepts
@@ -458,7 +493,8 @@ class ResumeEvidenceRetriever:
                 platforms = set(matched) & {"azure", "aws", "gcp"}
                 if platforms:
                     core_hit = _cloud_core_hit(req, matched, sn.text)
-                    if core_hit:
+                    cap_hit = _cloud_capability_hit(req, matched, sn.text)
+                    if core_hit and cap_hit:
                         score = max(score, 0.86)
                     else:
                         score = min(max(score, PARTIAL_THRESHOLD), STRONG_THRESHOLD - 0.01)
@@ -536,28 +572,61 @@ def _cloud_core_hit(req: CanonicalRequirement, matched: list[str], snippet_text:
     for plat, cores in (req.alternative_concepts or {}).items():
         if plat.lower() not in matched_l:
             continue
-        if cores and any(c in matched_l or _contains_concept(snippet_text, c) for c in cores):
+        if not cores:
+            return True
+        if any(c in matched_l or _contains_concept(snippet_text, c) for c in cores):
             return True
     return False
 
 
+def _cloud_capability_hit(req: CanonicalRequirement, matched: list[str], snippet_text: str) -> bool:
+    matched_l = {c.lower() for c in matched}
+    hay = snippet_text
+    for plat, caps in (req.alternative_capabilities or {}).items():
+        if plat.lower() not in matched_l:
+            continue
+        if not caps:
+            return True
+        if any(c in matched_l or _contains_concept(hay, c) for c in caps):
+            return True
+    if not any((req.alternative_capabilities or {}).values()):
+        return True
+    return False
+
+
+def _credential_phrase(text: str) -> str:
+    blob = normalize_text(text)
+    blob = re.sub(r"^(required|preferred|certifications?|certificate)\s+", "", blob)
+    return blob.strip()
+
+
+def _credential_match(required: str, resume_line: str) -> bool:
+    a, b = normalize_text(required), normalize_text(resume_line)
+    if not a or not b or len(a) < 8:
+        return False
+    if a in {"certified", "certification", "certificate"} or b in {"certified", "certification", "certificate"}:
+        return False
+    return a in b or b in a
+
+
 def _certification_claimed(req: CanonicalRequirement, retriever: "ResumeEvidenceRetriever") -> tuple[bool, str]:
-    hay = normalize_text(retriever.profile.text)
     names = [normalize_text(n) for n in (req.certification_names or []) if n]
-    if names:
-        for name in names:
-            if name and name in hay:
-                for sn in retriever.profile.snippets:
-                    if name in normalize_text(sn.text):
-                        return True, sn.text
-                return True, next((sn.text for sn in retriever.profile.snippets if name in normalize_text(sn.text)), name)
+    phrase = _credential_phrase(req.source_text or req.canonical_text)
+    candidates = [c for c in names + ([phrase] if phrase else []) if c and len(c) >= 8]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in candidates:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    if not unique:
         return False, ""
-    if re.search(r"\b(certified|certification|certificate)\b", retriever.profile.text or "", re.I):
-        ev = next(
-            (sn.text for sn in retriever.profile.snippets if re.search(r"\b(certified|certification|certificate)\b", sn.text, re.I)),
-            "",
-        )
-        return True, ev
+    for name in unique:
+        for sn in retriever.profile.snippets:
+            if _credential_match(name, sn.text):
+                return True, sn.text
+        if _credential_match(name, retriever.profile.text):
+            return True, name
     return False, ""
 
 
@@ -733,11 +802,12 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
                 if normalize_text(m) not in sibling and normalize_text(m) != matched_alternative.lower()
             ]
         cores = (req.alternative_concepts or {}).get(matched_alternative, []) if matched_alternative else []
-        branch_complete = bool(matched_alternative) and (
-            not cores or _cloud_core_hit(req, retrieval.matched_concepts, evidence_text)
-        )
-        if matched_alternative and cores and not branch_complete:
-            for concept in cores:
+        caps = (req.alternative_capabilities or {}).get(matched_alternative, []) if matched_alternative else []
+        core_ok = not cores or _cloud_core_hit(req, retrieval.matched_concepts, evidence_text)
+        cap_ok = not caps or _cloud_capability_hit(req, retrieval.matched_concepts, evidence_text)
+        branch_complete = bool(matched_alternative) and core_ok and cap_ok
+        if matched_alternative and not branch_complete:
+            for concept in (cores if not core_ok else []) + (caps if not cap_ok else []):
                 if concept not in missing:
                     missing.append(concept)
     else:
@@ -800,6 +870,11 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
 
     if score >= PARTIAL_THRESHOLD:
         reason = "Related evidence exists, but one or more required elements are missing."
+        if req.category == CATEGORY_CLOUD and matched_alternative and not branch_complete:
+            detail = ", ".join(missing[:4]) or "branch-specific product or capability evidence"
+            reason = (
+                f"{matched_alternative} experience is shown, but {detail} is not."
+            )
         if req.min_years and not duration_ok:
             reason = (
                 "Related work is shown, but the resume timeline does not clearly support "

@@ -8,7 +8,7 @@ Routing: [`ROUTING_PRECEDENCE.md`](ROUTING_PRECEDENCE.md)
 Shared thread: GitHub issue **JARVIS Root-Cause Debug Thread**
 
 Architecture-audit cadence: every 5–10 fixes. Last audit: none yet (bridge
-created 2026-09-18). Fixes logged below: 4.
+created 2026-09-18). Fixes logged below: 5.
 
 ---
 
@@ -38,6 +38,97 @@ REGRESSION TESTS:
 REMAINING RISKS:
 QUESTIONS FOR CHATGPT:
 ```
+
+---
+
+## 2026-09-18 — ChatGPT REVISE: branch capability, unknown certs, date-before-title
+
+BUG:
+Issue comment 5739531458 reviewed `fae37cd` as REVISE. Product-name mention
+(Foundry/Bedrock/Vertex) could still COVER a capability-specific branch.
+Unrecognized certification names fell back to any “certified” line. A date
+line immediately before a role title was erased by the role-boundary reset.
+
+EXPECTED:
+COVERED cloud branch = platform + product core + branch capability evidence
+from that branch’s source text. Product name alone is PARTIAL. Unknown
+credentials match only the same normalized phrase, never a generic
+certificate word. Layouts “Title | dates” and “dates then Title” both keep
+duration; a later undated role still resets stale dates.
+
+ACTUAL (fae37cd):
+`_cloud_core_hit()` treated any one core marker as complete. `_certification_claimed()`
+returned True on any certified/certificate token when `certification_names`
+was empty. `_is_role_boundary()` cleared a just-parsed adjacent date line.
+
+REPRODUCTION:
+New tests: Foundry mention vs Foundry+capability; Bedrock/Vertex pairs;
+Databricks vs CompTIA; same Databricks phrase; date-before-title COVERED;
+undated role after dated role still resets.
+
+RAW USER COMMAND:
+Read ChatGPT’s latest review in Issue #1, comment 5739531458. Fix the three
+remaining blockers.
+
+NORMALIZED COMMAND:
+Branch-capability gate, unknown-cert phrase match, pending-date role layout.
+Do not run live Deloitte A–E.
+
+ROUTE:
+N/A (matching layer).
+
+INTENT:
+comparison / evidence classification.
+
+PLANNER ADMISSION:
+Unchanged.
+
+TOOLS / ACTIONS CALLED:
+None.
+
+ROOT CAUSE:
+Branch completeness was one-layer (product core). Certification fallback was
+lexical “certified” rather than a credential phrase. Date state was a single
+sticky pair, so an undated title always reset, including when it belonged to
+the date line above it.
+
+ALTERNATIVE HYPOTHESES:
+1. Extraction dropped capability words from the job branch (rejected:
+   capabilities are now derived from each branch source text).
+2. Duration failed because leadership concepts were missing (rejected:
+   leadership path already passed; this was date-binding).
+
+FILES / FUNCTIONS:
+`src/agent/phase6/requirements.py` (`alternative_capabilities`)
+`src/agent/phase6/evidence.py` (`_cloud_capability_hit`, `_credential_match`,
+pending dates)
+`tests/test_semantic_matching.py`
+
+FIX:
+Two-layer cloud branch: core + capability. Certification compares normalized
+credential phrases only. Date-only lines become pending dates consumed by the
+next role header.
+
+AUTOMATED TESTS:
+PASS — count recorded on issue #1 after the run.
+
+LIVE TEST:
+NOT YET RUN — Deloitte 359035 A–E withheld.
+
+COMMIT SHA:
+Focused follow-up commit on this change set (full SHA on issue #1 after push).
+
+REGRESSION TESTS:
+Foundry/Bedrock/Vertex mention vs capability; unknown cert negative/positive;
+date-before-title; stale-date reset after a completed dated role.
+
+REMAINING RISKS:
+Capability markers are a closed lexicon derived from branch text, not
+embeddings. Live Deloitte wording can still differ.
+
+QUESTIONS FOR CHATGPT:
+Does platform + product + one derived capability satisfy COVERED, or should
+COVERED require more than one capability marker?
 
 ---
 

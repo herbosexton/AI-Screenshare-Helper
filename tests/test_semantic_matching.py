@@ -619,3 +619,166 @@ def test_date_context_does_not_leak_across_role_headers():
     )
     item = next(i for i in result.items if "python" in i.requirement.lower())
     assert item.status != COVERED
+
+
+DELOITTE_CLOUD_BRANCHES = (
+    "Requirements:\n"
+    "- Azure: AI Foundry (design, deployment, orchestration of AI/agentic applications)\n"
+    "and/or\n"
+    "- AWS: Amazon Bedrock (foundation models, model evaluation, and agent orchestration)\n"
+    "and/or\n"
+    "- GCP: Vertex AI (e.g., Model Garden, Agent Builder, custom training); Gemini API\n"
+)
+
+
+def test_foundry_mention_without_capability_is_partial():
+    result = JobResumeComparisonEngine().compare(
+        page_text=DELOITTE_CLOUD_BRANCHES,
+        resume_text="Experience\nUsed Azure AI Foundry for simple prompt experiments.\n",
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/foundry-only",
+    )
+    cloud = next(i for i in result.items if i.category == "cloud")
+    assert cloud.status == PARTIAL
+    assert cloud.status != COVERED
+    assert cloud.matched_alternative == "Azure"
+    assert "foundry" in cloud.resume_evidence.lower()
+    assert any(
+        tok in " ".join(cloud.missing_components).lower()
+        for tok in ("agentic", "orchestration", "deployment", "design")
+    )
+
+
+def test_foundry_plus_branch_capability_is_covered():
+    result = JobResumeComparisonEngine().compare(
+        page_text=DELOITTE_CLOUD_BRANCHES,
+        resume_text=(
+            "Experience\n"
+            "ML Engineer | Jan 2023 – Jan 2025\n"
+            "Designed and deployed agentic applications on Azure AI Foundry with tool orchestration.\n"
+        ),
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/foundry-capability",
+    )
+    cloud = next(i for i in result.items if i.category == "cloud")
+    assert cloud.status == COVERED
+    assert cloud.matched_alternative == "Azure"
+
+
+def test_bedrock_mention_only_is_partial_capability_covers():
+    mention = JobResumeComparisonEngine().compare(
+        page_text=DELOITTE_CLOUD_BRANCHES,
+        resume_text="Experience\nUsed Amazon Bedrock in a sandbox account.\n",
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/bedrock-only",
+    )
+    cloud = next(i for i in mention.items if i.category == "cloud")
+    assert cloud.status == PARTIAL
+    assert cloud.matched_alternative == "AWS"
+
+    capable = JobResumeComparisonEngine().compare(
+        page_text=DELOITTE_CLOUD_BRANCHES,
+        resume_text=(
+            "Experience\n"
+            "ML Engineer | Jan 2023 – Jan 2025\n"
+            "Built agent orchestration on Amazon Bedrock for foundation-model evaluation.\n"
+        ),
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/bedrock-capability",
+    )
+    covered = next(i for i in capable.items if i.category == "cloud")
+    assert covered.status == COVERED
+    assert covered.matched_alternative == "AWS"
+
+
+def test_vertex_mention_only_is_partial_capability_covers():
+    mention = JobResumeComparisonEngine().compare(
+        page_text=DELOITTE_CLOUD_BRANCHES,
+        resume_text="Experience\nExperimented with Gemini on Vertex AI.\n",
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/vertex-only",
+    )
+    cloud = next(i for i in mention.items if i.category == "cloud")
+    assert cloud.status == PARTIAL
+    assert cloud.matched_alternative == "GCP"
+
+    capable = JobResumeComparisonEngine().compare(
+        page_text=DELOITTE_CLOUD_BRANCHES,
+        resume_text=(
+            "Experience\n"
+            "ML Engineer | Jan 2023 – Jan 2025\n"
+            "Built Agent Builder workflows on Vertex AI with custom training for Gemini models.\n"
+        ),
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/vertex-capability",
+    )
+    covered = next(i for i in capable.items if i.category == "cloud")
+    assert covered.status == COVERED
+    assert covered.matched_alternative == "GCP"
+
+
+def test_unrecognized_certification_does_not_match_unrelated_certificate():
+    result = JobResumeComparisonEngine().compare(
+        page_text="Requirements:\n- Databricks Certified Generative AI Engineer Associate\n",
+        resume_text="Certifications\nCompTIA Security+ Certification\n",
+        job_title="Data Engineer",
+        job_url="https://jobs.example.com/cert-unrelated",
+    )
+    cert = next(i for i in result.items if i.category == "certification" or "databricks" in i.requirement.lower())
+    assert cert.status == NOT_FOUND
+    assert "comptia" not in (cert.resume_evidence or "").lower()
+
+
+def test_unrecognized_certification_covers_when_same_phrase_appears():
+    result = JobResumeComparisonEngine().compare(
+        page_text="Requirements:\n- Databricks Certified Generative AI Engineer Associate\n",
+        resume_text="Certifications\nDatabricks Certified Generative AI Engineer Associate\n",
+        job_title="Data Engineer",
+        job_url="https://jobs.example.com/cert-same",
+    )
+    cert = next(i for i in result.items if i.category == "certification" or "databricks" in i.requirement.lower())
+    assert cert.status == COVERED
+    assert "databricks" in cert.resume_evidence.lower()
+
+
+def test_date_line_before_role_header_preserves_duration():
+    resume = (
+        "Experience\n"
+        "Jan 2023 – Jan 2025\n"
+        "Engagement Lead\n"
+        "Led project workstreams and client engagements, translating business needs into delivery plans.\n"
+    )
+    profile = parse_resume(resume)
+    lead = next(sn for sn in profile.snippets if "workstream" in sn.text.lower())
+    assert lead.start is not None
+    result = JobResumeComparisonEngine().compare(
+        page_text=(
+            "Requirements:\n"
+            "- 1+ years experience leading project workstreams/engagements, translating business needs\n"
+        ),
+        resume_text=resume,
+        job_title="Consultant",
+        job_url="https://jobs.example.com/date-before-title",
+    )
+    item = next(
+        i for i in result.items
+        if i.category == "leadership" or "workstream" in i.requirement.lower()
+    )
+    assert item.status == COVERED
+    assert item.duration_verified
+
+
+def test_new_undated_role_after_completed_dated_role_resets():
+    resume = (
+        "Experience\n"
+        "Jan 2020 – Jan 2024\n"
+        "ML Engineer\n"
+        "Led workshops for stakeholders.\n"
+        "Business Consultant\n"
+        "Built Python dashboards for clients.\n"
+    )
+    profile = parse_resume(resume)
+    workshop = next(sn for sn in profile.snippets if "workshop" in sn.text.lower())
+    python = next(sn for sn in profile.snippets if "python" in sn.text.lower())
+    assert workshop.start is not None
+    assert python.start is None
