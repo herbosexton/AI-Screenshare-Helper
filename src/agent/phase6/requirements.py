@@ -171,7 +171,9 @@ class CanonicalRequirement:
     travel_percent: Optional[int] = None
     certification_names: list[str] = field(default_factory=list)
     subcomponents: list[str] = field(default_factory=list)
+    alternatives: list[str] = field(default_factory=list)
     source_text: str = ""
+    source_texts: list[str] = field(default_factory=list)
     source_section: str = ""
     source_scope: str = "WEB_DOCUMENT"
     source_method: str = ""
@@ -312,8 +314,9 @@ def _canonical_label(text: str, category: str, technologies: list[str], min_year
             names.append("AWS")
         if "gcp" in technologies:
             names.append("GCP")
-        joined = "/".join(names) or "Azure/AWS/GCP"
-        return f"{joined} agentic AI stack experience"
+        if not names:
+            names = ["Azure", "AWS", "GCP"]
+        return "Cloud agentic AI stack (" + " or ".join(names) + ")"
     if category == CATEGORY_TRAVEL:
         m = _TRAVEL.search(raw)
         pct = m.group(1) if m else ""
@@ -407,6 +410,7 @@ def _from_raw(raw: dict[str, Any], index: int) -> CanonicalRequirement:
         certification_names=certs,
         subcomponents=_subcomponents(text),
         source_text=text,
+        source_texts=[text] if text else [],
         source_section=section,
         source_scope=str(raw.get("source_scope") or "WEB_DOCUMENT"),
         source_method=str(raw.get("source_method") or ""),
@@ -415,6 +419,10 @@ def _from_raw(raw: dict[str, Any], index: int) -> CanonicalRequirement:
     )
     if category == CATEGORY_EXPERIENCE and "agentic" in normalize_text(text) and not req.subcomponents:
         req.subcomponents = [t for t in techs if t in _AGENT_TECH]
+    if category == CATEGORY_CLOUD and not req.alternatives:
+        req.alternatives = [
+            label for tech, label in (("azure", "Azure"), ("aws", "AWS"), ("gcp", "GCP")) if tech in techs
+        ]
     req.aliases = _aliases(req)
     return req
 
@@ -428,6 +436,7 @@ def _merge_cloud_group(items: list[dict[str, Any]], start_index: int) -> Canonic
             if tech not in techs:
                 techs.append(tech)
     preferred = any(bool(i.get("preferred")) for i in items)
+    alts = [label for tech, label in (("azure", "Azure"), ("aws", "AWS"), ("gcp", "GCP")) if tech in techs]
     req = CanonicalRequirement(
         id=f"req_{start_index:02d}",
         canonical_text=_canonical_label(combined, CATEGORY_CLOUD, techs, None),
@@ -435,7 +444,9 @@ def _merge_cloud_group(items: list[dict[str, Any]], start_index: int) -> Canonic
         required_or_preferred="preferred" if preferred else "required",
         technologies=techs,
         subcomponents=texts,
+        alternatives=alts or ["Azure", "AWS", "GCP"],
         source_text=combined,
+        source_texts=[t for t in texts if t],
         source_section=str(items[0].get("job_source_section") or "required"),
         source_scope=str(items[0].get("source_scope") or "WEB_DOCUMENT"),
         source_method=str(items[0].get("source_method") or ""),
@@ -515,7 +526,11 @@ def canonicalize_requirements(raw_items: list[dict[str, Any]]) -> tuple[list[Can
             stats.duplicate_groups += 1
             stats.duplicates_removed += len(group) - 1
             winner = max(group, key=lambda r: (len(r.source_text), len(r.canonical_text), len(r.technologies)))
+            proven: list[str] = []
             for extra in group:
+                for src in list(extra.source_texts or []) + ([extra.source_text] if extra.source_text else []):
+                    if src and src not in proven:
+                        proven.append(src)
                 if extra is winner:
                     continue
                 for tech in extra.technologies:
@@ -524,8 +539,21 @@ def canonicalize_requirements(raw_items: list[dict[str, Any]]) -> tuple[list[Can
                 for sub in extra.subcomponents:
                     if sub not in winner.subcomponents:
                         winner.subcomponents.append(sub)
+                for alt in extra.alternatives:
+                    if alt not in winner.alternatives:
+                        winner.alternatives.append(alt)
+                for field_name in extra.degree_fields:
+                    if field_name not in winner.degree_fields:
+                        winner.degree_fields.append(field_name)
+                if extra.degree_level and (
+                    not winner.degree_level
+                    or len(extra.source_text) > len(winner.source_text)
+                ):
+                    if not winner.degree_level:
+                        winner.degree_level = extra.degree_level
                 if extra.source_text and extra.source_text not in winner.aliases:
                     winner.aliases.append(normalize_text(extra.source_text))
+            winner.source_texts = proven
             winner.aliases = _aliases(winner)
             merged.append(winner)
         else:

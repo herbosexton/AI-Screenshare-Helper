@@ -20,6 +20,7 @@ from src.agent.phase6.requirements import (
     RequirementContentClassifier,
     RequirementFragmentValidator,
     canonicalize_requirements,
+    normalize_text,
 )
 
 DELOITTE_JOB = """
@@ -48,23 +49,26 @@ Preferred:
 - You may also be eligible to participate in a discretionary annual incentive program
 """
 
-RESUME = """
-Herbert Sexton IV
-high-growth business
+SANITIZED_RESUME = """
+Candidate A
 
 Education
-Bachelor of Science in Finance & Economics
+B.A. in Finance & Economics
 State University, 2022
 
 Experience
 Data Analyst | Acme Corp
-Designed and maintained scalable data pipelines and automated ETL workflows using Python and SQL, enabling real-time ingestion of sales, customer, and supply chain datasets.
-Developed and deployed machine learning models (regression, classification, clustering) to support demand forecasting.
+Designed and maintained scalable data pipelines and automated ETL workflows using Python and SQL.
+Built data-mining workflows, statistical modeling, and feature-engineering steps for forecasting.
+Developed and deployed machine learning models (regression, classification, clustering).
+Prototyped a deep-learning ranking model for demand signals.
 
-SBDC Business Consultant
-Provided strategic consulting and 1:1 guidance to early-stage vendors on business planning, branding, digital marketing, and financial forecasting.
-Developed and executed growth strategies and investor outreach.
+Business Consultant
+Provided strategic consulting and advisory guidance on business planning, branding, digital marketing, and investor outreach.
+Led workstream planning and leadership workshops for client teams.
 """
+
+RESUME = SANITIZED_RESUME
 
 
 def _compare(job: str = DELOITTE_JOB, resume: str = RESUME):
@@ -170,7 +174,7 @@ def test_cloud_does_not_match_sales_bullets():
 def test_generic_tokens_are_not_evidence():
     result = JobResumeComparisonEngine().compare(
         page_text="Requirements:\n- Azure AI Foundry, OpenAI Service, Vector DBs, Entra ID, Key Vault\n",
-        resume_text="Herbert Sexton IV\nhigh-growth business\nexperience\nDevelopment Engineer\nProvided strategic consulting and investor outreach.",
+        resume_text="Candidate A\nhigh-growth business\nexperience\nDevelopment Engineer\nProvided strategic consulting and investor outreach.",
         job_title="Cloud Engineer",
         job_url="https://jobs.example.com/cloud",
     )
@@ -258,3 +262,192 @@ def test_agentic_parent_keeps_subcomponents():
     assert all(i.status in {PARTIAL, NOT_FOUND} for i in agentic)
     if agentic[0].status == PARTIAL:
         assert agentic[0].missing_components
+
+
+def test_cloud_alternative_group_one_branch_satisfies():
+    raw = [
+        {"requirement": "Azure: AI Foundry (design, deployment, orchestration of AI/agentic applications)", "category": "required"},
+        {"requirement": "and/or", "category": "required"},
+        {"requirement": "AWS: Amazon Bedrock (foundation models, model evaluation, and agent orchestration)", "category": "required"},
+        {"requirement": "and/or", "category": "required"},
+        {"requirement": "GCP: Vertex AI (e.g., Model Garden, Agent Builder, custom training); Gemini API", "category": "required"},
+    ]
+    canon, _ = canonicalize_requirements(raw)
+    assert len(canon) == 1
+    req = canon[0]
+    assert req.category == "cloud"
+    assert set(req.alternatives) >= {"Azure", "AWS", "GCP"}
+    assert len(req.source_texts) >= 3
+    result = JobResumeComparisonEngine().compare(
+        page_text=(
+            "Requirements:\n"
+            "- Azure: AI Foundry\n"
+            "and/or\n"
+            "- AWS: Amazon Bedrock\n"
+            "and/or\n"
+            "- GCP: Vertex AI\n"
+        ),
+        resume_text=(
+            "Experience\n"
+            "ML Engineer | Jan 2023 – Jan 2025\n"
+            "Deployed agentic applications on Azure AI Foundry and Azure OpenAI.\n"
+        ),
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/cloud-or",
+    )
+    cloud = next(i for i in result.items if i.category == "cloud")
+    assert cloud.status == COVERED
+    assert cloud.alternatives
+    assert cloud.matched_alternative == "Azure"
+    answer = format_evidence(result, "Why did you mark the cloud stack as covered?")
+    assert "azure" in answer.lower()
+    assert "matched branch" in answer.lower()
+
+
+def test_category_mismatch_consulting_never_supports_technical():
+    result = JobResumeComparisonEngine().compare(
+        page_text=(
+            "Requirements:\n"
+            "- 2+ years of hands-on experience building AI/ML solutions using Python\n"
+            "- Azure or AWS or GCP agentic stack\n"
+            "- Bachelor's or Master's degree in Computer Science, Engineering, Data Science, AI, or related field\n"
+            "- AWS Certified Solutions Architect\n"
+            "- LangChain, AutoGen, CrewAI, LangGraph agent orchestration\n"
+        ),
+        resume_text=(
+            "Experience\n"
+            "Business Consultant\n"
+            "Provided strategic consulting and advisory guidance on business planning, "
+            "branding, digital marketing, and investor outreach.\n"
+            "Led sales workshops and high-growth business development for client teams.\n"
+        ),
+        job_title="Agentic Engineer",
+        job_url="https://jobs.example.com/mismatch",
+    )
+    forbidden_ev = ("consulting", "advisory", "investor", "branding", "sales", "high-growth")
+    for item in result.items:
+        if item.category in {"cloud", "degree", "certification"} or "python" in item.requirement.lower() or "lang" in item.requirement.lower() or "agentic" in item.requirement.lower():
+            blob = " ".join(
+                [item.resume_evidence or "", " ".join(item.resume_evidence_texts or [])]
+            ).lower()
+            assert not any(tok in blob for tok in forbidden_ev), item.requirement
+            if item.category in {"cloud", "certification"} or "python" in item.requirement.lower():
+                assert item.status in {NOT_FOUND, PARTIAL, NEEDS_CONFIRMATION}
+                if item.category == "cloud":
+                    assert item.status == NOT_FOUND
+
+
+def test_ambiguous_pronoun_asks_for_clarification():
+    result = _compare()
+    spoken = "Why that one?"
+    item = RequirementLookup().resolve(spoken, result)
+    assert item is None
+    answer = format_evidence(result, spoken)
+    assert "which requirement" in answer.lower()
+    assert answer.count("Status:") == 0
+
+
+def test_timeline_boundary_months_and_overlap():
+    short = JobResumeComparisonEngine().compare(
+        page_text="Requirements:\n- 2+ years of hands-on experience building AI/ML solutions using Python\n",
+        resume_text=(
+            "Experience\n"
+            "Machine Learning Engineer | Jan 2023 – Dec 2024\n"
+            "Built production AI/ML solutions using Python.\n"
+        ),
+        job_title="ML Engineer",
+        job_url="https://jobs.example.com/23mo",
+    )
+    item = next(i for i in short.items if "python" in i.requirement.lower())
+    assert item.status != COVERED
+
+    exact = JobResumeComparisonEngine().compare(
+        page_text="Requirements:\n- 2+ years of hands-on experience building AI/ML solutions using Python\n",
+        resume_text=(
+            "Experience\n"
+            "Machine Learning Engineer | Jan 2023 – Jan 2025\n"
+            "Built production AI/ML solutions using Python.\n"
+        ),
+        job_title="ML Engineer",
+        job_url="https://jobs.example.com/24mo",
+    )
+    exact_item = next(i for i in exact.items if "python" in i.requirement.lower())
+    assert exact_item.status == COVERED
+    assert exact_item.duration_verified
+
+    overlap = JobResumeComparisonEngine().compare(
+        page_text="Requirements:\n- 5+ years of experience delivering AI/ML solutions using Python\n",
+        resume_text=(
+            "Experience\n"
+            "ML Engineer | Jan 2020 – Jan 2023\n"
+            "Built production AI/ML solutions using Python.\n"
+            "Data Scientist | Jan 2022 – Jan 2024\n"
+            "Shipped Python ranking models and ETL jobs.\n"
+        ),
+        job_title="ML Engineer",
+        job_url="https://jobs.example.com/overlap",
+    )
+    overlap_item = next(i for i in overlap.items if "python" in i.requirement.lower())
+    assert overlap_item.status != COVERED
+    assert overlap_item.duration_verified
+
+
+def test_degree_provenance_merges_jsonld_and_field_sentence():
+    raw = [
+        {"requirement": "Bachelor's Degree", "category": "education", "source_method": "json-ld"},
+        {
+            "requirement": "Bachelor's or Master's degree in Computer Science, Engineering, Data Science, AI, or related field",
+            "category": "required",
+        },
+    ]
+    canon, stats = canonicalize_requirements(raw)
+    degrees = [r for r in canon if r.category == "degree"]
+    assert len(degrees) == 1
+    req = degrees[0]
+    assert stats.duplicates_removed >= 1
+    assert len(req.source_texts) >= 2
+    assert any("bachelor's degree" == normalize_text(s) for s in req.source_texts) or any(
+        s.lower() == "bachelor's degree" for s in req.source_texts
+    )
+    assert any("computer science" in s.lower() for s in req.source_texts)
+    assert req.degree_level == "bachelor"
+    result = _compare()
+    degree = next(i for i in result.items if i.category == "degree")
+    assert degree.status in {PARTIAL, NEEDS_CONFIRMATION}
+    assert "missing" not in degree.reason.lower() or "field" in degree.reason.lower()
+    assert "finance" in (degree.reason + degree.resume_evidence).lower() or "economics" in (
+        degree.reason + degree.resume_evidence
+    ).lower()
+    assert len(degree.source_texts) >= 2 or len(req.source_texts) >= 2
+
+
+def test_sanitized_resume_shape_does_not_attach_unrelated_evidence():
+    result = _compare(resume=SANITIZED_RESUME)
+    technical = [
+        i for i in result.items
+        if i.category in {"cloud", "certification"}
+        or "python" in i.requirement.lower()
+        or "agentic" in i.requirement.lower()
+        or "langgraph" in i.requirement.lower()
+    ]
+    for item in technical:
+        blob = " ".join([item.resume_evidence or "", " ".join(item.resume_evidence_texts or [])]).lower()
+        assert "investor outreach" not in blob
+        assert "branding" not in blob
+        assert "advisory guidance" not in blob
+        if item.category == "cloud":
+            assert item.status == NOT_FOUND
+            assert not item.resume_evidence
+
+
+def test_forbidden_output_never_becomes_a_requirement():
+    result = _compare()
+    blob = " ".join(i.requirement.lower() for i in result.items)
+    assert "and/or" not in blob
+    assert "wage" not in blob
+    assert "122,000" not in blob
+    assert "annual incentive" not in blob
+    detailed = format_detailed(result).lower()
+    assert "and/or" not in detailed
+    assert "annual incentive" not in detailed
+    assert "wage range" not in detailed

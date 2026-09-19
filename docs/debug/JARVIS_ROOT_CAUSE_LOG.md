@@ -8,7 +8,7 @@ Routing: [`ROUTING_PRECEDENCE.md`](ROUTING_PRECEDENCE.md)
 Shared thread: GitHub issue **JARVIS Root-Cause Debug Thread**
 
 Architecture-audit cadence: every 5–10 fixes. Last audit: none yet (bridge
-created 2026-09-18). Fixes logged below: 2.
+created 2026-09-18). Fixes logged below: 3.
 
 ---
 
@@ -38,6 +38,110 @@ REGRESSION TESTS:
 REMAINING RISKS:
 QUESTIONS FOR CHATGPT:
 ```
+
+---
+
+## 2026-09-18 — ChatGPT review: cloud OR-group, gates, degree provenance, “that one”
+
+BUG:
+The first matching pass still flattened Azure/AWS/GCP into one vague string,
+scored 0.75/0.45 before category/concept/duration gates, kept JSON-LD
+“Bachelor's Degree” as a separate gap, and resolved “that one” to the first
+COVERED item. ChatGPT marked the shared thread NEEDS MORE EVIDENCE because
+those behaviors were not independently reviewable.
+
+EXPECTED:
+One cloud parent with alternatives; one valid branch may satisfy the parent
+and must be named. Hard gates first (category → required concepts →
+duration/credential → score). JSON-LD degree + field sentence merge into one
+canonical requirement with both source texts. Ambiguous “that one” asks a
+short local clarification (`planner_calls=0`). No private resume/PII in git.
+
+ACTUAL (pre-this-commit):
+Cloud label was a flat “Azure/AWS/GCP” string. “Why that one was covered?”
+returned the first COVERED Python item. Missing regression tests 1–7. Matching
+code was buried in the whole-tree publish commit.
+
+REPRODUCTION:
+Automated tests 1–7 in `tests/test_semantic_matching.py`. Live Deloitte 359035
+A–E are prepared but not claimed.
+
+RAW USER COMMAND:
+ChatGPT review follow-up: make the semantic-matching fix independently
+reviewable; do not start another broad refactor.
+
+NORMALIZED COMMAND:
+Implement review items A–D; add tests 1–7; focused matching commit only.
+
+ROUTE:
+N/A (code review / matching layer). Follow-up path remains local HUD.
+
+INTENT:
+comparison_followup / SHOW_EVIDENCE when the user asks about a stored item.
+
+PLANNER ADMISSION:
+Follow-up tests assert `planner_calls=0`.
+
+TOOLS / ACTIONS CALLED:
+None for the ambiguous-pronoun path.
+
+ROOT CAUSE:
+Cloud grouping collapsed alternatives into one string and treated sibling
+platforms as missing subcomponents. Thresholds were applied as if they were
+the first gate. Degree identity merged texts but follow-up/lookup still
+guessed. Deictic lookup fell through to the first COVERED item.
+
+ALTERNATIVE HYPOTHESES:
+1. Extraction still emitting separate cloud bullets (rejected: canonicalize
+   now builds one parent with `alternatives`).
+2. Score denominator made a single Azure hit look weak (confirmed: one
+   matched branch now satisfies the parent after hard gates).
+
+FILES / FUNCTIONS:
+`src/agent/phase6/requirements.py` (`_merge_cloud_group`, degree provenance)
+`src/agent/phase6/evidence.py` (`classify_requirement`, `duration_meets`)
+`src/agent/phase6/lookup.py` (`RequirementLookup._resolve`)
+`src/agent/phase6/compare.py` (`format_evidence` → `answer`)
+`src/agent/phase6/compare_types.py`
+`tests/test_semantic_matching.py` (tests 1–7)
+`tests/test_utterance_routing.py` (`test_why_covered_uses_stored_evidence`)
+
+FIX:
+Parent cloud requirement with alternatives; one branch may COVERED and is
+recorded as `matched_alternative`. Gates: category → required concepts →
+duration in calendar months → 0.75/0.45. Degree sources kept; field-fit
+evaluated separately. “That one” clarifies unless one salient recent item.
+
+AUTOMATED TESTS:
+PASS — `test_semantic_matching` + `test_phase6_orchestrator` +
+`test_utterance_routing` = 195 passed.
+
+LIVE TEST:
+NOT YET RUN — Deloitte 359035 A–E. Do not treat this commit as live PASS.
+
+COMMIT SHA:
+Focused matching commit on this change set (full SHA recorded on issue #1
+after push).
+
+REGRESSION TESTS:
+Cloud OR-group; consulting/sales category mismatch; ambiguous pronoun;
+23-month vs 24-month vs overlapping roles; degree provenance; sanitized
+resume shape; forbidden and/or + wage + incentive output.
+
+REMAINING RISKS:
+Date parser is still line-local. Related-field degree remains a policy call.
+Live Deloitte A–E can still fail even if these unit tests pass.
+
+QUESTIONS FOR CHATGPT:
+1. Cloud alternatives are a parent `CanonicalRequirement` with
+   `alternatives=["Azure","AWS","GCP"]` and `matched_alternative` when one
+   branch hits. Is that the representation you wanted?
+2. Gates are category → required concepts/branch → duration/credential →
+   0.75/0.45. Thresholds were not lowered.
+3. JSON-LD “Bachelor's Degree” is provenance on the longer field sentence,
+   not a separate gap. Field-fit is evaluated separately from degree level.
+4. “That one” no longer auto-selects the first COVERED item. Multiple recent
+   items → local clarification, `planner_calls=0`.
 
 ---
 

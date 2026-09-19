@@ -165,6 +165,16 @@ _SALESY = re.compile(
     r"sales|customer acquisition|pipeline of vendors)\b",
     re.I,
 )
+_BUSINESS_GROWTH = re.compile(
+    r"\b(consulting|consultant|advisory|investor outreach|go-to-market|"
+    r"branding|digital marketing|business planning|business development|"
+    r"sales|customer acquisition|high-growth)\b",
+    re.I,
+)
+_HARD_TECH = frozenset({
+    "python", "azure", "aws", "gcp", "langchain", "langgraph", "autogen",
+    "crewai", "semantic kernel",
+})
 
 
 def _parse_date_token(token: str) -> Optional[date]:
@@ -355,17 +365,33 @@ class ResumeEvidenceRetriever:
             compatible = _section_compatible(req.category, sn.section)
             if req.category in {CATEGORY_DEGREE, CATEGORY_CERTIFICATION} and not compatible:
                 continue
-            if req.category == CATEGORY_CLOUD and _SALESY.search(sn.text) and not extract_technologies(sn.text):
+            if _SALESY.search(sn.text) and req.category in {
+                CATEGORY_CLOUD, CATEGORY_DEGREE, CATEGORY_CERTIFICATION,
+            }:
                 continue
+            if _SALESY.search(sn.text) and req.category in {CATEGORY_SKILL, CATEGORY_EXPERIENCE}:
+                needed = set(req.technologies or []) | set(c.lower() for c in (req.alternatives or []))
+                if needed & {"python", "azure", "aws", "gcp", "langchain", "langgraph", "autogen", "crewai"}:
+                    if not extract_technologies(sn.text) and "python" not in normalize_text(sn.text):
+                        continue
             matched = [c for c in concepts if _contains_concept(sn.text, c)]
             if not matched:
                 if _generic_only_overlap(req.source_text or req.canonical_text, sn.text):
                     continue
                 continue
+            guarded = (
+                req.category in {CATEGORY_CLOUD, CATEGORY_DEGREE, CATEGORY_CERTIFICATION}
+                or bool(set(req.technologies or []) & _HARD_TECH)
+                or "agentic" in normalize_text(req.source_text + " " + req.canonical_text)
+            )
+            if guarded and _BUSINESS_GROWTH.search(sn.text) and not (set(matched) & _HARD_TECH):
+                continue
             weight = sum(_CONCEPT_WEIGHTS.get(c, 0.6) for c in matched)
             denom = max(1.0, sum(_CONCEPT_WEIGHTS.get(c, 0.6) for c in concepts) or 1.0)
             score = min(1.0, weight / denom)
-            if req.category == CATEGORY_CLOUD and not (set(matched) & {"azure", "aws", "gcp"}):
+            if req.category == CATEGORY_CLOUD and (set(matched) & {"azure", "aws", "gcp"}):
+                score = max(score, 0.86)
+            elif req.category == CATEGORY_CLOUD:
                 score *= 0.25
             if not compatible:
                 if req.category in {CATEGORY_DEGREE, CATEGORY_CERTIFICATION}:
@@ -426,8 +452,20 @@ class ResumeEvidenceRetriever:
                 merged[-1] = (prev_s, max(prev_e, end))
             else:
                 merged.append((start, end))
-        years = sum(_range_years(s, e) or 0.0 for s, e in merged)
-        return years, True
+        months = sum(_calendar_months(s, e) for s, e in merged)
+        return months / 12.0, True
+
+
+def _calendar_months(start: date, end: date) -> int:
+    return max(0, (end.year - start.year) * 12 + (end.month - start.month))
+
+
+def duration_meets(min_years: float, years: Optional[float]) -> bool:
+    if years is None:
+        return False
+    needed_months = int(round(float(min_years) * 12))
+    have_months = int(round(float(years) * 12))
+    return have_months >= needed_months
 
 
 def _degree_status(req: CanonicalRequirement, profile: ResumeProfile) -> tuple[str, str, list[str], float]:
@@ -483,6 +521,8 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
         "semantic_similarity": round(retrieval.best_score, 3),
         "category_compatible": retrieval.category_compatible,
         "duration_verified": retrieval.duration_verified,
+        "alternatives": list(req.alternatives),
+        "source_texts": list(req.source_texts or ([req.source_text] if req.source_text else [])),
     }
     evidence_text = retrieval.hits[0].text if retrieval.hits else ""
     evidence_ids = [h.snippet_id for h in retrieval.hits]
@@ -531,6 +571,8 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
 
     missing = list(retrieval.missing_concepts)
     for sub in req.subcomponents:
+        if req.category == CATEGORY_CLOUD:
+            continue
         if normalize_text(sub) not in normalize_text(evidence_text) and not any(
             normalize_text(sub) in normalize_text(h.text) for h in retrieval.hits
         ):
@@ -542,14 +584,39 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
         if not retrieval.duration_verified:
             duration_ok = False
             missing.append(f"{req.min_years:g}+ years verified from the resume timeline")
-        elif (retrieval.duration_years or 0.0) + 1e-9 < req.min_years:
+        elif not duration_meets(req.min_years, retrieval.duration_years):
             duration_ok = False
             missing.append(
                 f"{req.min_years:g}+ years (timeline shows about {retrieval.duration_years:.1f} years)"
             )
 
+    matched_alternative = ""
+    if req.category == CATEGORY_CLOUD:
+        for alt in req.alternatives or ["Azure", "AWS", "GCP"]:
+            if alt.lower() in {c.lower() for c in retrieval.matched_concepts}:
+                matched_alternative = alt
+                break
+        extra["matched_alternative"] = matched_alternative
+        if matched_alternative:
+            sibling = {"azure", "aws", "gcp"} - {matched_alternative.lower()}
+            missing = [
+                m for m in missing
+                if normalize_text(m) not in sibling and normalize_text(m) != matched_alternative.lower()
+            ]
+
     score = retrieval.best_score
-    if not retrieval.hits:
+    category_ok = bool(retrieval.category_compatible)
+    required_ok = True
+    if req.category == CATEGORY_CLOUD:
+        required_ok = bool(matched_alternative) or bool(
+            set(retrieval.matched_concepts) & {"azure", "aws", "gcp"}
+        )
+    elif req.technologies:
+        required_ok = any(t in retrieval.matched_concepts for t in req.technologies[:3]) or bool(
+            retrieval.matched_concepts
+        )
+
+    if not retrieval.hits or not category_ok or not required_ok:
         return RequirementItem(
             requirement=req.canonical_text,
             status=NOT_FOUND,
@@ -562,14 +629,17 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
             **extra,
         )
 
-    direct = bool(retrieval.matched_concepts) and retrieval.category_compatible
     strong = (
-        direct
-        and score >= STRONG_THRESHOLD
+        category_ok
+        and required_ok
         and duration_ok
+        and score >= STRONG_THRESHOLD
         and not (req.subcomponents and len(missing) >= max(2, math.ceil(len(req.subcomponents) * 0.5)))
     )
     if strong:
+        reason = "Direct, requirement-specific resume evidence meets the strong-match threshold."
+        if matched_alternative:
+            reason = f"Matched the {matched_alternative} branch of the cloud agent stack."
         return RequirementItem(
             requirement=req.canonical_text,
             status=COVERED,
@@ -579,7 +649,7 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
             category=req.category,
             resume_evidence_ids=evidence_ids,
             resume_evidence_texts=evidence_texts,
-            reason="Direct, requirement-specific resume evidence meets the strong-match threshold.",
+            reason=reason,
             missing_components=[],
             **extra,
         )

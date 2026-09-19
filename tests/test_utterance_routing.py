@@ -750,7 +750,13 @@ def test_why_covered_uses_stored_evidence(tmp_path):
     assert classify_analysis_followup("Why did you say that one was covered?").kind == SHOW_EVIDENCE
     result = _orch(tmp_path).handle_user_message("Why did you say that one was covered?")
     assert result.get("planner_admitted") is False
-    assert "built python agents" in (result.get("message") or "").lower()
+    assert result.get("planner_calls") == 0
+    msg = (result.get("message") or "").lower()
+    assert "which requirement" in msg
+    assert "built python agents" not in msg
+    python = _orch(tmp_path).handle_user_message("Why did you mark Python as covered?")
+    assert python.get("planner_calls") == 0
+    assert "built python agents" in (python.get("message") or "").lower()
 
 
 def test_compare_this_one_is_new_phase6_not_reuse(tmp_path):

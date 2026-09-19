@@ -39,6 +39,9 @@ class RequirementItem:
     semantic_similarity: float = 0.0
     category_compatible: bool = False
     duration_verified: bool = False
+    alternatives: list[str] = field(default_factory=list)
+    matched_alternative: str = ""
+    source_texts: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

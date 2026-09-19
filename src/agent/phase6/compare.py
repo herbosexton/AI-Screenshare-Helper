@@ -21,7 +21,7 @@ from src.agent.phase6.evidence import (
     classify_requirement,
     gap_priority,
 )
-from src.agent.phase6.lookup import RequirementLookup, format_requirement_answer
+from src.agent.phase6.lookup import RequirementLookup
 from src.agent.phase6.requirements import (
     canonicalize_requirements,
     normalize_text,
@@ -519,10 +519,7 @@ def format_confirmation(result: ComparisonResult) -> str:
 
 
 def format_evidence(result: ComparisonResult, needle: str = "") -> str:
-    item = RequirementLookup().resolve(needle, result)
-    if item is None:
-        return "I do not have a stored comparison item that matches that follow-up."
-    return format_requirement_answer(item)
+    return RequirementLookup().answer(needle, result)
 
 
 def contains_comparison(text: str, result: Optional[ComparisonResult] = None) -> bool:
