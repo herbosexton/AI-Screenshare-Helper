@@ -16,6 +16,8 @@ _TECH_HINTS = {
     "travel": ("travel",),
     "consulting": ("consult", "client-facing", "client facing"),
     "certification": ("certif",),
+    "leadership": ("lead", "workstream", "engagement"),
+    "clearance": ("clearance", "ts/sci", "secret"),
 }
 _DEICTIC = re.compile(
     r"\b(why (did you (say|mark) )?(that|this|it)( one)?|that one|this one)\b",
@@ -23,7 +25,7 @@ _DEICTIC = re.compile(
 )
 _SPECIFIC = re.compile(
     r"\b(python|azure|aws|gcp|cloud|degree|bachelor|master|travel|agentic|"
-    r"langgraph|langchain|consult|certif|clearance|sponsorship)\b",
+    r"langgraph|langchain|consult|certif|clearance|sponsorship|workstream|leadership)\b",
     re.I,
 )
 CLARIFY_FOLLOWUP = (

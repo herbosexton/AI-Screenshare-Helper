@@ -8,7 +8,7 @@ Routing: [`ROUTING_PRECEDENCE.md`](ROUTING_PRECEDENCE.md)
 Shared thread: GitHub issue **JARVIS Root-Cause Debug Thread**
 
 Architecture-audit cadence: every 5–10 fixes. Last audit: none yet (bridge
-created 2026-09-18). Fixes logged below: 3.
+created 2026-09-18). Fixes logged below: 4.
 
 ---
 
@@ -38,6 +38,100 @@ REGRESSION TESTS:
 REMAINING RISKS:
 QUESTIONS FOR CHATGPT:
 ```
+
+---
+
+## 2026-09-18 — ChatGPT REVISE: leadership/clearance dead paths, cert and cloud-branch gates
+
+BUG:
+Issue #1 review of `243e84e` was REVISE. Leadership/workstream and clearance
+requirements could not form evidence because `requirement_concepts()` never
+synthesized those concepts. Certification used platform skill as evidence.
+Any Azure/AWS/GCP token was boosted to COVERED. PARTIAL fired on any matched
+concept below 0.45.
+
+EXPECTED:
+Leadership matches leadership/workstream evidence; duration still independently
+verified. Clearance matches TS/SCI / Top Secret. Certification requires the
+credential name. A platform token alone is at most PARTIAL against a
+Foundry/Bedrock/Vertex branch. PARTIAL requires score >= 0.45. Role headers
+without dates must not inherit the previous role's chronology.
+
+ACTUAL (243e84e):
+Leadership/clearance → NOT_FOUND despite relevant resume lines. "AWS" skill
+could support "AWS Certified Solutions Architect". "Used Azure Storage" could
+COVER an AI Foundry branch. `if score >= 0.45 or matched_concepts`.
+
+REPRODUCTION:
+New tests in `tests/test_semantic_matching.py`: leadership duration,
+clearance, cert negative/positive, generic Azure vs Foundry, Foundry COVERED,
+PARTIAL threshold, date-context leak.
+
+RAW USER COMMAND:
+Read ChatGPT’s latest review in Issue #1 and address every blocking finding.
+
+NORMALIZED COMMAND:
+Fix the five blocking matching defects; do not run live Deloitte A–E.
+
+ROUTE:
+N/A (matching-layer review). Follow-ups remain local.
+
+INTENT:
+comparison / evidence classification.
+
+PLANNER ADMISSION:
+Unchanged. `planner_calls=0` for stored-item follow-ups.
+
+TOOLS / ACTIONS CALLED:
+None for these unit regressions.
+
+ROOT CAUSE:
+Category-specific concept synthesis existed only for consulting/presentation.
+Cloud scoring treated a platform token as a complete alternative. Certification
+reused extract_technologies (AWS) instead of credential names. PARTIAL used
+concept presence as a bypass around 0.45. Resume date context persisted across
+undated role headers.
+
+ALTERNATIVE HYPOTHESES:
+1. Extraction dropped leadership/clearance bullets (rejected: category was
+   inferred; retrieval had no concepts to match).
+2. Thresholds were too high (rejected: platform-only Azure was over-boosted
+   to 0.86, not starved).
+
+FILES / FUNCTIONS:
+`src/agent/phase6/requirements.py` (`alternative_concepts`, branch cores)
+`src/agent/phase6/evidence.py` (`requirement_concepts`, `_certification_claimed`,
+`_cloud_core_hit`, PARTIAL gate, `_is_role_boundary`)
+`src/agent/phase6/lookup.py` (leadership/clearance hints)
+`tests/test_semantic_matching.py`
+
+FIX:
+Leadership/clearance concepts and aliases. Certification requires the named
+credential. Cloud branch cores (Foundry/Bedrock/Vertex) must hit for COVERED;
+platform-only is capped below 0.75. PARTIAL requires score >= 0.45. New
+undated role headers reset inherited dates.
+
+AUTOMATED TESTS:
+PASS — semantic matching + orchestrator + utterance routing (count recorded
+on the issue after the run).
+
+LIVE TEST:
+NOT YET RUN — Deloitte 359035 A–E still withheld by request.
+
+COMMIT SHA:
+Focused follow-up commit on this change set (full SHA on issue #1 after push).
+
+REGRESSION TESTS:
+Leadership+duration; TS/SCI; AWS skill ≠ cert; Azure Storage ≠ Foundry COVERED;
+Foundry+agentic COVERED; PARTIAL <0.45 is NOT_FOUND; date leak across roles.
+
+REMAINING RISKS:
+Role-header heuristic is conservative. Related-field degree remains a policy
+call. Live Deloitte text can still differ from fixtures.
+
+QUESTIONS FOR CHATGPT:
+Do these five gates match the intended matcher semantics, or should
+platform-only cloud stay NOT_FOUND instead of PARTIAL?
 
 ---
 

@@ -113,6 +113,16 @@ _CONCEPT_WEIGHTS = {
     "deep learning": 0.8,
     "generative ai": 0.9,
     "ai/ml": 0.7,
+    "leadership": 1.0,
+    "workstream": 1.0,
+    "engagement": 0.9,
+    "clearance": 1.15,
+    "certification": 1.15,
+    "ai foundry": 1.15,
+    "foundry": 1.15,
+    "bedrock": 1.15,
+    "vertex": 1.15,
+    "gemini": 1.1,
 }
 
 _CONCEPT_ALIASES = {
@@ -143,6 +153,19 @@ _CONCEPT_ALIASES = {
     "deep learning": ("deep learning", "neural network"),
     "generative ai": ("generative ai", "genai", "llm"),
     "ai/ml": ("ai/ml", "machine learning", "artificial intelligence"),
+    "leadership": ("leadership", "leading", "led"),
+    "workstream": ("workstream", "workstreams"),
+    "engagement": ("engagements", "client engagement"),
+    "clearance": (
+        "ts/sci", "ts sci", "top secret", "secret clearance",
+        "public trust", "security clearance",
+    ),
+    "certification": ("certified", "certification", "certificate"),
+    "ai foundry": ("ai foundry", "foundry"),
+    "foundry": ("ai foundry", "foundry"),
+    "bedrock": ("bedrock", "amazon bedrock"),
+    "vertex": ("vertex", "vertex ai"),
+    "gemini": ("gemini",),
 }
 
 _CATEGORY_SECTIONS = {
@@ -243,6 +266,27 @@ class RetrievalResult:
     missing_concepts: list[str] = field(default_factory=list)
 
 
+_ROLE_VERBS = frozenset({
+    "built", "build", "developed", "deployed", "designed", "provided",
+    "created", "implemented", "maintained", "automated", "trained",
+    "supported", "executed", "prototyped", "wrote", "shipped",
+})
+
+
+def _is_role_boundary(line: str, section: str) -> bool:
+    if (section or "") not in {"experience", "work", "professional experience", ""}:
+        return False
+    raw = (line or "").strip()
+    if not raw or len(raw) > 90 or raw.endswith((".", "!", "?")):
+        return False
+    words = raw.replace("|", " ").split()
+    if not (1 <= len(words) <= 10):
+        return False
+    if any(w.lower().strip(",.") in _ROLE_VERBS for w in words):
+        return False
+    return bool(re.match(r"^[A-Z0-9]", raw))
+
+
 def parse_resume(resume_text: str) -> ResumeProfile:
     text = (resume_text or "").replace("\xa0", " ")
     profile = ResumeProfile(text=text)
@@ -266,10 +310,13 @@ def parse_resume(resume_text: str) -> ResumeProfile:
                 section = "projects"
             elif "experience" in section or "employment" in section:
                 section = "experience"
+            current_dates = (None, None)
             continue
         dm = _DATE_RANGE.search(line)
         if dm:
             current_dates = (_parse_date_token(dm.group("a")), _parse_date_token(dm.group("b")))
+        elif _is_role_boundary(line, section):
+            current_dates = (None, None)
         if section == "education" or _DEGREE_LINE.search(line):
             level, fields = extract_degree(line)
             if level and not profile.degree_level:
@@ -308,6 +355,11 @@ def parse_resume(resume_text: str) -> ResumeProfile:
 
 
 def requirement_concepts(req: CanonicalRequirement) -> list[str]:
+    if req.category == CATEGORY_CERTIFICATION:
+        names = [normalize_text(n) for n in (req.certification_names or []) if n]
+        return names or ["certification"]
+    if req.category == CATEGORY_CLEARANCE:
+        return ["clearance"]
     concepts: list[str] = []
     for tech in req.technologies:
         if tech not in concepts:
@@ -322,13 +374,26 @@ def requirement_concepts(req: CanonicalRequirement) -> list[str]:
         concepts.append("consulting")
     if req.category == CATEGORY_PRESENTATION and "presentation" not in concepts:
         concepts.append("presentation")
+    if req.category == CATEGORY_LEADERSHIP:
+        if "leadership" not in concepts:
+            concepts.append("leadership")
+        if "workstream" in blob and "workstream" not in concepts:
+            concepts.append("workstream")
+        if "engagement" in blob and "engagement" not in concepts:
+            concepts.append("engagement")
+    for cores in (req.alternative_concepts or {}).values():
+        for concept in cores:
+            if concept not in concepts:
+                concepts.append(concept)
     return concepts
 
 
 def _contains_concept(text: str, concept: str) -> bool:
     blob = normalize_text(text)
     for alias in _CONCEPT_ALIASES.get(concept, (concept,)):
-        if alias in blob:
+        if not alias:
+            continue
+        if re.search(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", blob):
             return True
     return False
 
@@ -389,10 +454,16 @@ class ResumeEvidenceRetriever:
             weight = sum(_CONCEPT_WEIGHTS.get(c, 0.6) for c in matched)
             denom = max(1.0, sum(_CONCEPT_WEIGHTS.get(c, 0.6) for c in concepts) or 1.0)
             score = min(1.0, weight / denom)
-            if req.category == CATEGORY_CLOUD and (set(matched) & {"azure", "aws", "gcp"}):
-                score = max(score, 0.86)
-            elif req.category == CATEGORY_CLOUD:
-                score *= 0.25
+            if req.category == CATEGORY_CLOUD:
+                platforms = set(matched) & {"azure", "aws", "gcp"}
+                if platforms:
+                    core_hit = _cloud_core_hit(req, matched, sn.text)
+                    if core_hit:
+                        score = max(score, 0.86)
+                    else:
+                        score = min(max(score, PARTIAL_THRESHOLD), STRONG_THRESHOLD - 0.01)
+                else:
+                    score *= 0.25
             if not compatible:
                 if req.category in {CATEGORY_DEGREE, CATEGORY_CERTIFICATION}:
                     continue
@@ -458,6 +529,36 @@ class ResumeEvidenceRetriever:
 
 def _calendar_months(start: date, end: date) -> int:
     return max(0, (end.year - start.year) * 12 + (end.month - start.month))
+
+
+def _cloud_core_hit(req: CanonicalRequirement, matched: list[str], snippet_text: str) -> bool:
+    matched_l = {c.lower() for c in matched}
+    for plat, cores in (req.alternative_concepts or {}).items():
+        if plat.lower() not in matched_l:
+            continue
+        if cores and any(c in matched_l or _contains_concept(snippet_text, c) for c in cores):
+            return True
+    return False
+
+
+def _certification_claimed(req: CanonicalRequirement, retriever: "ResumeEvidenceRetriever") -> tuple[bool, str]:
+    hay = normalize_text(retriever.profile.text)
+    names = [normalize_text(n) for n in (req.certification_names or []) if n]
+    if names:
+        for name in names:
+            if name and name in hay:
+                for sn in retriever.profile.snippets:
+                    if name in normalize_text(sn.text):
+                        return True, sn.text
+                return True, next((sn.text for sn in retriever.profile.snippets if name in normalize_text(sn.text)), name)
+        return False, ""
+    if re.search(r"\b(certified|certification|certificate)\b", retriever.profile.text or "", re.I):
+        ev = next(
+            (sn.text for sn in retriever.profile.snippets if re.search(r"\b(certified|certification|certificate)\b", sn.text, re.I)),
+            "",
+        )
+        return True, ev
+    return False, ""
 
 
 def duration_meets(min_years: float, years: Optional[float]) -> bool:
@@ -569,6 +670,34 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
             **extra,
         )
 
+    if req.category == CATEGORY_CERTIFICATION:
+        claimed, ev = _certification_claimed(req, retriever)
+        if not claimed:
+            return RequirementItem(
+                requirement=req.canonical_text,
+                status=NOT_FOUND,
+                resume_evidence="",
+                job_evidence=req.source_text,
+                confidence=0.86,
+                category=req.category,
+                reason="The resume does not show this certification by name.",
+                missing_components=req.certification_names or [req.canonical_text],
+                **extra,
+            )
+        return RequirementItem(
+            requirement=req.canonical_text,
+            status=COVERED,
+            resume_evidence=ev,
+            job_evidence=req.source_text,
+            confidence=0.9,
+            category=req.category,
+            resume_evidence_ids=evidence_ids,
+            resume_evidence_texts=[ev] if ev else evidence_texts,
+            reason="The named certification is shown on the resume.",
+            missing_components=[],
+            **extra,
+        )
+
     missing = list(retrieval.missing_concepts)
     for sub in req.subcomponents:
         if req.category == CATEGORY_CLOUD:
@@ -603,6 +732,16 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
                 m for m in missing
                 if normalize_text(m) not in sibling and normalize_text(m) != matched_alternative.lower()
             ]
+        cores = (req.alternative_concepts or {}).get(matched_alternative, []) if matched_alternative else []
+        branch_complete = bool(matched_alternative) and (
+            not cores or _cloud_core_hit(req, retrieval.matched_concepts, evidence_text)
+        )
+        if matched_alternative and cores and not branch_complete:
+            for concept in cores:
+                if concept not in missing:
+                    missing.append(concept)
+    else:
+        branch_complete = True
 
     score = retrieval.best_score
     category_ok = bool(retrieval.category_compatible)
@@ -633,8 +772,13 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
         category_ok
         and required_ok
         and duration_ok
+        and branch_complete
         and score >= STRONG_THRESHOLD
-        and not (req.subcomponents and len(missing) >= max(2, math.ceil(len(req.subcomponents) * 0.5)))
+        and not (
+            req.category != CATEGORY_CLOUD
+            and req.subcomponents
+            and len(missing) >= max(2, math.ceil(len(req.subcomponents) * 0.5))
+        )
     )
     if strong:
         reason = "Direct, requirement-specific resume evidence meets the strong-match threshold."
@@ -654,7 +798,7 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
             **extra,
         )
 
-    if score >= PARTIAL_THRESHOLD or retrieval.matched_concepts:
+    if score >= PARTIAL_THRESHOLD:
         reason = "Related evidence exists, but one or more required elements are missing."
         if req.min_years and not duration_ok:
             reason = (

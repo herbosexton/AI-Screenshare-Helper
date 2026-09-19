@@ -98,6 +98,11 @@ _TECH_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 
 _CLOUD_TECH = frozenset({"azure", "aws", "gcp"})
 _AGENT_TECH = frozenset({"langchain", "langgraph", "autogen", "crewai", "semantic kernel"})
+_CLOUD_BRANCH_CORE = {
+    "Azure": ("ai foundry", "foundry"),
+    "AWS": ("bedrock", "amazon bedrock"),
+    "GCP": ("vertex", "vertex ai", "gemini"),
+}
 _CERT_NAMES = re.compile(
     r"(azure ai engineer associate|azure solutions architect expert|"
     r"aws certified[\w\s-]*|google professional[\w\s-]*|pmp|comptia[\w\s-]*)",
@@ -172,6 +177,7 @@ class CanonicalRequirement:
     certification_names: list[str] = field(default_factory=list)
     subcomponents: list[str] = field(default_factory=list)
     alternatives: list[str] = field(default_factory=list)
+    alternative_concepts: dict[str, list[str]] = field(default_factory=dict)
     source_text: str = ""
     source_texts: list[str] = field(default_factory=list)
     source_section: str = ""
@@ -196,6 +202,15 @@ class CanonicalizationStats:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def cloud_branch_core_concepts(text: str, platform: str) -> list[str]:
+    blob = normalize_text(text)
+    found: list[str] = []
+    for marker in _CLOUD_BRANCH_CORE.get(platform, ()):
+        if marker in blob and marker not in found:
+            found.append(marker)
+    return found
 
 
 def extract_technologies(text: str) -> list[str]:
@@ -423,6 +438,11 @@ def _from_raw(raw: dict[str, Any], index: int) -> CanonicalRequirement:
         req.alternatives = [
             label for tech, label in (("azure", "Azure"), ("aws", "AWS"), ("gcp", "GCP")) if tech in techs
         ]
+        req.alternative_concepts = {
+            label: cloud_branch_core_concepts(text, label)
+            for tech, label in (("azure", "Azure"), ("aws", "AWS"), ("gcp", "GCP"))
+            if tech in techs
+        }
     req.aliases = _aliases(req)
     return req
 
@@ -452,6 +472,12 @@ def _merge_cloud_group(items: list[dict[str, Any]], start_index: int) -> Canonic
         source_method=str(items[0].get("source_method") or ""),
         preferred=preferred,
     )
+    branch_concepts: dict[str, list[str]] = {}
+    for text in texts:
+        for tech, label in (("azure", "Azure"), ("aws", "AWS"), ("gcp", "GCP")):
+            if tech in extract_technologies(text) or re.search(rf"\b{tech}\b", text or "", re.I):
+                branch_concepts[label] = cloud_branch_core_concepts(text, label)
+    req.alternative_concepts = branch_concepts
     req.aliases = _aliases(req)
     return req
 
@@ -542,6 +568,11 @@ def canonicalize_requirements(raw_items: list[dict[str, Any]]) -> tuple[list[Can
                 for alt in extra.alternatives:
                     if alt not in winner.alternatives:
                         winner.alternatives.append(alt)
+                for plat, cores in (extra.alternative_concepts or {}).items():
+                    existing = winner.alternative_concepts.setdefault(plat, [])
+                    for concept in cores:
+                        if concept not in existing:
+                            existing.append(concept)
                 for field_name in extra.degree_fields:
                     if field_name not in winner.degree_fields:
                         winner.degree_fields.append(field_name)
