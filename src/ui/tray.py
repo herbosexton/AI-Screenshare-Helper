@@ -15,6 +15,8 @@ class HotkeyListener(QObject):
     audio_toggled = pyqtSignal()
     overlay_toggled = pyqtSignal()
     question_triggered = pyqtSignal()
+    jarvis_triggered = pyqtSignal()
+    emergency_stop_triggered = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -26,6 +28,8 @@ class HotkeyListener(QObject):
             "<ctrl>+<shift>+z": self._on_audio_toggle,
             "<ctrl>+<shift>+h": self._on_overlay_toggle,
             "<ctrl>+<shift>+q": self._on_question,
+            "<ctrl>+<shift>+j": self._on_jarvis,
+            "<ctrl>+<shift>+<esc>": self._on_emergency_stop,
         })
         self._listener = hotkeys
         hotkeys.start()
@@ -45,6 +49,12 @@ class HotkeyListener(QObject):
 
     def _on_question(self):
         self.question_triggered.emit()
+
+    def _on_jarvis(self):
+        self.jarvis_triggered.emit()
+
+    def _on_emergency_stop(self):
+        self.emergency_stop_triggered.emit()
 
 
 class SystemTray(QObject):
@@ -84,6 +94,18 @@ class SystemTray(QObject):
         self._question_action = QAction("Ask Question (Ctrl+Shift+Q)")
         self._question_action.triggered.connect(self._on_question)
         menu.addAction(self._question_action)
+
+        self._jarvis_action = QAction("Open Jarvis Window")
+        self._jarvis_action.triggered.connect(self._on_open_jarvis_window)
+        menu.addAction(self._jarvis_action)
+
+        self._jarvis_ask_action = QAction("Ask Jarvis (Ctrl+Shift+J)")
+        self._jarvis_ask_action.triggered.connect(self._on_jarvis)
+        menu.addAction(self._jarvis_ask_action)
+
+        self._stop_action = QAction("Emergency Stop (Ctrl+Shift+Esc)")
+        self._stop_action.triggered.connect(self._on_emergency_stop)
+        menu.addAction(self._stop_action)
 
         menu.addSeparator()
 
@@ -135,6 +157,8 @@ class SystemTray(QObject):
         self._hotkey_listener.audio_toggled.connect(self._on_audio_toggle)
         self._hotkey_listener.overlay_toggled.connect(self._on_overlay_toggle)
         self._hotkey_listener.question_triggered.connect(self._on_question)
+        self._hotkey_listener.jarvis_triggered.connect(self._on_jarvis)
+        self._hotkey_listener.emergency_stop_triggered.connect(self._on_emergency_stop)
         self._hotkey_listener.start()
 
     def show(self):
@@ -154,7 +178,7 @@ class SystemTray(QObject):
 
     def _do_capture(self):
         try:
-            answer = self._controller.capture_and_analyze()
+            self._controller.capture_and_analyze()
             self._tray.setToolTip("Notes")
         except Exception as e:
             print(f"[Error] Capture failed: {e}")
@@ -175,6 +199,48 @@ class SystemTray(QObject):
             self._controller.ask_question(question)
         except Exception as e:
             print(f"[Tray] Question error: {e}")
+
+    def _on_jarvis(self):
+        # Prefer the conversation window; fall back to quick dialog
+        if hasattr(self._controller, "show_jarvis_window"):
+            self._controller.show_jarvis_window()
+            return
+        text, ok = QInputDialog.getText(
+            None, "Jarvis", "What should I do?"
+        )
+        if ok and text.strip():
+            threading.Thread(
+                target=self._do_jarvis, args=(text,), daemon=True
+            ).start()
+
+    def _on_open_jarvis_window(self):
+        if hasattr(self._controller, "show_jarvis_window"):
+            self._controller.show_jarvis_window()
+
+    def _do_jarvis(self, text: str):
+        try:
+            result = self._controller.handle_agent_command(text)
+            msg = (result or {}).get("message") or "Done"
+            self._tray.showMessage(
+                "Jarvis",
+                msg[:180],
+                QSystemTrayIcon.MessageIcon.Information,
+                2500,
+            )
+        except Exception as e:
+            print(f"[Tray] Jarvis error: {e}")
+
+    def _on_emergency_stop(self):
+        try:
+            self._controller.emergency_stop()
+            self._tray.showMessage(
+                "Jarvis",
+                "Emergency stop engaged",
+                QSystemTrayIcon.MessageIcon.Warning,
+                2000,
+            )
+        except Exception as e:
+            print(f"[Tray] Emergency stop error: {e}")
 
     def _on_audio_toggle(self):
         """Toggle audio listening."""

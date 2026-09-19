@@ -1,0 +1,80 @@
+{
+  "preprocess_ms": 24.7,
+  "image_size": [
+    768,
+    432
+  ],
+  "cold_wall_ms": 21212.1,
+  "warm_wall_ms": 2632.6,
+  "cold_stats": {
+    "backend": "ollama_native",
+    "load_duration_ms": 19.7,
+    "prompt_eval_count": 600,
+    "prompt_eval_duration_ms": 17826.0,
+    "eval_count": 24,
+    "eval_duration_ms": 1901.5,
+    "total_duration_ms": 20940.9,
+    "tokens_per_sec": 12.62,
+    "done_reason": "stop",
+    "wall_ms": 21212.1,
+    "model": "llava"
+  },
+  "warm_stats": {
+    "backend": "ollama_native",
+    "load_duration_ms": 21.6,
+    "prompt_eval_count": 603,
+    "prompt_eval_duration_ms": 314.1,
+    "eval_count": 25,
+    "eval_duration_ms": 1981.4,
+    "total_duration_ms": 2328.1,
+    "tokens_per_sec": 12.62,
+    "done_reason": "stop",
+    "wall_ms": 2632.5,
+    "model": "llava"
+  },
+  "ps_before": {
+    "ok": true,
+    "models": [
+      {
+        "name": "llava:latest",
+        "size": 4571324416,
+        "size_vram": 0,
+        "expires_at": "2026-09-17T16:23:12.5824303-07:00",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "llama",
+          "families": [
+            "llama",
+            "clip"
+          ],
+          "parameter_size": "7B",
+          "quantization_level": "Q4_0"
+        }
+      }
+    ]
+  },
+  "ps_after": {
+    "ok": true,
+    "models": [
+      {
+        "name": "llava:latest",
+        "size": 4571324416,
+        "size_vram": 0,
+        "expires_at": "2026-09-17T16:23:43.4660928-07:00",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "llama",
+          "families": [
+            "llama",
+            "clip"
+          ],
+          "parameter_size": "7B",
+          "quantization_level": "Q4_0"
+        }
+      }
+    ]
+  },
+  "timeout_s": 40
+}

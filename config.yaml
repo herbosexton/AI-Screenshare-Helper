@@ -13,8 +13,24 @@ audio:
   enabled: true
   system_audio: true
   microphone: true
-  transcription_model: "base"
+  transcription_model: "small"
   buffer_seconds: 30
+
+voice:
+  # Local only — never sends audio to the cloud
+  stt_provider: "local"
+  local_model: "small"
+  silence_seconds: 1.15
+  min_speech_seconds: 0.45
+  max_utterance_seconds: 45
+  energy_threshold: 0.008
+  pre_roll_seconds: 0.85
+  start_voiced_frames: 3
+  end_hang_frames: 2
+  echo_window_ms: 550
+  echo_match_threshold: 0.62
+  barge_in_silence_seconds: 0.4
+  barge_in_min_speech_seconds: 0.28
 
 output:
   mode: "all"
@@ -30,3 +46,63 @@ humanize:
   style: "casual_technical"
   imperfection_level: 0.3
   code_style: "slightly_messy"
+
+agent:
+  enabled: true
+  autonomy_mode: "assist"
+  provider: "ollama"
+  ollama_base_url: "http://127.0.0.1:11434/v1"
+  model: "qwen3:30b-a3b"
+  vision_model: "llava"
+  max_steps: 30
+  timeout_s: 30
+
+  # Cloud provider for Phase 6 planning (hybrid mode).
+  # Set OPENAI_API_KEY as an environment variable, or paste it into cloud_api_key below.
+  # When set, multi-step planning uses GPT-4o (fast, reliable JSON) while
+  # single-command chat stays on the local Ollama model (free, private).
+  # Set OPENAI_API_KEY as an environment variable, or uncomment and paste here:
+  # cloud_api_key: "sk-..."
+  cloud_provider: "openai"
+  cloud_model: "gpt-4o"
+  cloud_timeout_s: 30
+
+  planner_timeout_s: 35
+  perf_debug: true
+  auto_start_ollama: true
+  ollama_startup_timeout_s: 60
+  computer_control_enabled: true
+  data_dir: "data"
+  allowed_directories: []
+  blocked_directories: []
+
+files:
+  enabled: true
+  allowed_directories:
+    - "%USERPROFILE%\\Documents"
+    - "%USERPROFILE%\\Downloads"
+    - "%USERPROFILE%\\Desktop"
+  read_only_directories: []
+  blocked_directories:
+    - "%USERPROFILE%\\.ssh"
+    - "%LOCALAPPDATA%\\Google\\Chrome\\User Data"
+  max_read_bytes: 2000000
+  index_on_startup: false
+  max_index_text_chars: 50000
+
+browser:
+  enabled: true
+  headed: true
+  persist_profile: true
+  # Prefer installed Chrome, then Edge, then bundled Chromium. Never attach to the daily Chrome profile.
+  channel: chrome
+  allowed_hosts: []
+  blocked_hosts: []
+  navigation_timeout_ms: 20000
+
+dashboard:
+  accent: "red"
+  city: "Los Angeles"
+  temperature_unit: "fahrenheit"
+  # Weather uses Open-Meteo over the network. Set false for fully offline UI.
+  weather_enabled: true

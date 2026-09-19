@@ -11,3 +11,12 @@ venv/
 env/
 assets/*.png
 .cursor/
+data/
+.pytest_cache/
+*.db
+
+# Local config contains API keys — never commit
+config.local.yaml
+
+# Detached app logs from local runs
+logs/

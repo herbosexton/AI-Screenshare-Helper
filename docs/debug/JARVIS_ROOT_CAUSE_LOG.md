@@ -145,9 +145,8 @@ NOT YET RUN on this build for Deloitte 359035 tests A–E
 threshold; raw vs canonical log counts; forbidden-item count = 0).
 
 COMMIT SHA:
-(pending focused commit after this log; matching source is still local — see
-bridge note in the GitHub issue. Origin still only has the initial screenshare
-commit.)
+8d18551 (debug bridge on origin/main). Matching engine source is still local /
+untracked so ChatGPT can inspect this protocol commit without a whole-tree dump.
 
 REGRESSION TESTS:
 - fragments / wage never become requirements

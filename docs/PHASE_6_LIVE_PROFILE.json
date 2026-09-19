@@ -1,0 +1,31 @@
+{
+  "model": "qwen2.5:7b",
+  "site": "http://127.0.0.1:61906",
+  "results": {
+    "test12_failure_recovery": {
+      "ok": true,
+      "task_status": "BLOCKED",
+      "planner_calls_per_task": 2,
+      "replan_count": 1,
+      "steps_total": 2,
+      "steps_completed": 1,
+      "tools_used": [
+        "browser.click",
+        "browser.getVisibleText"
+      ],
+      "step_errors": [
+        "DOM selector failed for 'btn.checkout'; accessibility retry missed"
+      ],
+      "message": "I could not find and click Checkout button.",
+      "elapsed_ms": 38438.0,
+      "attempts": {
+        "Find and click Checkout button": 2,
+        "Find page heading text": 1
+      },
+      "bounded": true,
+      "failure_codes": [
+        "DOM selector failed for 'btn.checkout'; accessibility retry missed"
+      ]
+    }
+  }
+}

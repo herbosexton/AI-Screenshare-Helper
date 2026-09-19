@@ -35,6 +35,17 @@ python main.py
 
 The app will start minimized in your system tray.
 
+### Local browser (Phase 5)
+
+Jarvis uses an isolated Playwright Chromium window (not your daily Chrome profile).
+
+```bash
+pip install playwright
+playwright install chromium
+```
+
+Then type in the HUD: `Open https://example.com and tell me the heading`
+
 ## Hotkeys
 
 | Hotkey | Action |

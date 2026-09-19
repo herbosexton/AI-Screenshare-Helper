@@ -1,0 +1,157 @@
+# ============================================================
+# JARVIS Phase 7 — Centralized Permission Policy Configuration
+# ============================================================
+#
+# This file defines the default policy rules for all action types.
+# Policy precedence (highest wins):
+#   1. EMERGENCY_STOP
+#   2. EXPLICIT_DENY (user denied this action)
+#   3. SYSTEM_SECURITY (secret paths, blocked dirs, dangerous schemes)
+#   4. EXPIRED/INVALID approval
+#   5. USER_SCOPED_GRANT (task/session authorization)
+#   6. EXPLICIT_USER_INSTRUCTION
+#   7. DEFAULT_ACTION_POLICY (below)
+#
+# Risk levels:
+#   0 = OBSERVE          (read screen, read file, get URL)
+#   1 = LOCAL_REVERSIBLE (open app, navigate, scroll, fill form)
+#   2 = LOCAL_PERSISTENT (create/modify/rename/move file)
+#   3 = DESTRUCTIVE/EXTERNAL (delete, send, submit, share)
+#   4 = HIGH_IMPACT      (purchase, financial, legal, security)
+
+# --- Autonomy Mode ---
+# observe  = read-only, no actions
+# assist   = auto-allow L0-L1, approval for L2+
+# autonomous = auto-allow L0-L2, approval for L3+
+autonomy_mode: assist
+
+# --- Risk Level Defaults ---
+risk_defaults:
+  observe:
+    decision: ALLOW
+    reason: "Read-only action — no approval needed"
+
+  local_reversible:
+    decision: ALLOW
+    reason: "Local reversible action — auto-allowed in assist/autonomous mode"
+
+  local_persistent:
+    decision: REQUIRE_APPROVAL
+    reason: "Local persistent action — approval required unless scoped grant exists"
+    allow_explicit_instruction: true
+
+  destructive_external:
+    decision: REQUIRE_APPROVAL
+    reason: "Destructive or external action — user approval required"
+    allow_scoped_grant: true
+
+  high_impact:
+    decision: REQUIRE_APPROVAL
+    reason: "High-impact action — explicit near-action confirmation always required"
+    allow_scoped_grant: false
+    force_near_action: true
+
+# --- Approval Settings ---
+approval:
+  default_ttl_seconds: 120          # 2 minutes
+  high_impact_ttl_seconds: 60       # 1 minute for financial/legal
+  max_pending: 1                    # Only 1 voice-addressable approval at a time
+  require_hash_match: true          # TOCTOU protection
+
+# --- File Operation Classification ---
+file_operations:
+  read:
+    risk: 0                         # OBSERVE
+  open:
+    risk: 1                         # LOCAL_REVERSIBLE
+  create:
+    risk: 2                         # LOCAL_PERSISTENT
+  modify:
+    risk: 2
+  rename:
+    risk: 2
+  move:
+    risk: 2
+  copy:
+    risk: 2
+  delete_to_recycle_bin:
+    risk: 3                         # DESTRUCTIVE_EXTERNAL
+    reversible: true
+    prefer_over_permanent: true
+  permanent_delete:
+    risk: 4                         # HIGH_IMPACT
+    reversible: false
+    require_explicit_request: true
+
+# --- Communication/Email Classification ---
+communication:
+  read:
+    risk: 0
+  draft:
+    risk: 1
+  edit_draft:
+    risk: 1
+  send:
+    risk: 3
+  forward:
+    risk: 3
+  reply:
+    risk: 3
+  delete:
+    risk: 3
+  archive:
+    risk: 2
+  share:
+    risk: 3
+
+# --- Form Submission Classification ---
+forms:
+  discovery:
+    risk: 0
+  fill:
+    risk: 1
+  review:
+    risk: 0
+  submit_search:
+    risk: 1                         # Search forms are low risk
+  submit_application:
+    risk: 3                         # Job apps, registrations
+  submit_legal:
+    risk: 4                         # Government, legal forms
+  submit_purchase:
+    risk: 4                         # Checkout, payment
+
+# --- Safety Guards ---
+guards:
+  duplicate_window_seconds: 30      # Block duplicate external actions within 30s
+  rate_max_per_window: 5            # Max 5 external actions per minute
+  rate_window_seconds: 60
+  min_risk_for_guards: 3            # Only guard L3+ actions
+
+# --- Emergency Stop ---
+emergency:
+  cancel_pending_approvals: true
+  clear_action_queue: true
+  block_state_changing: true
+  require_explicit_resume: true
+
+# --- Computer Control ---
+computer_control:
+  enabled: true
+  classify_click_targets: true      # Check if clicking Submit/Purchase/Send
+  require_approval_for_submit: true
+
+# --- Download Safety ---
+downloads:
+  allow: true
+  auto_execute: false               # Never auto-run downloaded files
+  audit_all: true
+
+# --- Application Execution ---
+applications:
+  known_apps_low_risk: true         # Opening Chrome, Notepad, etc. is L1
+  downloaded_executables: 4         # Running downloaded .exe is HIGH_IMPACT
+  shell_commands:
+    read_only: 1                    # dir, type, systeminfo
+    modify: 3                       # del, rd, reg, net
+    install: 4                      # msiexec, choco, winget
