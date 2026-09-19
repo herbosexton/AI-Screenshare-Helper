@@ -265,6 +265,8 @@ class EvidenceHit:
     section: str
     score: float
     matched_concepts: list[str] = field(default_factory=list)
+    branch: str = ""
+    branch_complete: bool = False
 
 
 @dataclass
@@ -489,15 +491,12 @@ class ResumeEvidenceRetriever:
             weight = sum(_CONCEPT_WEIGHTS.get(c, 0.6) for c in matched)
             denom = max(1.0, sum(_CONCEPT_WEIGHTS.get(c, 0.6) for c in concepts) or 1.0)
             score = min(1.0, weight / denom)
+            branch = ""
+            branch_complete = False
             if req.category == CATEGORY_CLOUD:
-                platforms = set(matched) & {"azure", "aws", "gcp"}
-                if platforms:
-                    core_hit = _cloud_core_hit(req, matched, sn.text)
-                    cap_hit = _cloud_capability_hit(req, matched, sn.text)
-                    if core_hit and cap_hit:
-                        score = max(score, 0.86)
-                    else:
-                        score = min(max(score, PARTIAL_THRESHOLD), STRONG_THRESHOLD - 0.01)
+                scored = _score_cloud_branches(req, matched, sn.text)
+                if scored:
+                    branch, score, branch_complete, _, _ = scored
                 else:
                     score *= 0.25
             if not compatible:
@@ -513,6 +512,8 @@ class ResumeEvidenceRetriever:
                     section=sn.section,
                     score=score,
                     matched_concepts=matched,
+                    branch=branch,
+                    branch_complete=branch_complete,
                 )
             )
         hits.sort(key=lambda h: h.score, reverse=True)
@@ -567,31 +568,53 @@ def _calendar_months(start: date, end: date) -> int:
     return max(0, (end.year - start.year) * 12 + (end.month - start.month))
 
 
-def _cloud_core_hit(req: CanonicalRequirement, matched: list[str], snippet_text: str) -> bool:
-    matched_l = {c.lower() for c in matched}
-    for plat, cores in (req.alternative_concepts or {}).items():
-        if plat.lower() not in matched_l:
-            continue
-        if not cores:
-            return True
-        if any(c in matched_l or _contains_concept(snippet_text, c) for c in cores):
-            return True
-    return False
-
-
-def _cloud_capability_hit(req: CanonicalRequirement, matched: list[str], snippet_text: str) -> bool:
-    matched_l = {c.lower() for c in matched}
-    hay = snippet_text
-    for plat, caps in (req.alternative_capabilities or {}).items():
-        if plat.lower() not in matched_l:
-            continue
-        if not caps:
-            return True
-        if any(c in matched_l or _contains_concept(hay, c) for c in caps):
-            return True
-    if not any((req.alternative_capabilities or {}).values()):
+def _cloud_core_hit(req: CanonicalRequirement, matched: list[str], snippet_text: str, platform: str) -> bool:
+    cores = (req.alternative_concepts or {}).get(platform, [])
+    if not cores:
         return True
-    return False
+    matched_l = {c.lower() for c in matched}
+    return any(c in matched_l or _contains_concept(snippet_text, c) for c in cores)
+
+
+def _cloud_capability_hit(req: CanonicalRequirement, matched: list[str], snippet_text: str, platform: str) -> bool:
+    caps = (req.alternative_capabilities or {}).get(platform, [])
+    if not caps:
+        return True
+    matched_l = {c.lower() for c in matched}
+    return any(c in matched_l or _contains_concept(snippet_text, c) for c in caps)
+
+
+def _score_cloud_branches(
+    req: CanonicalRequirement, matched: list[str], snippet_text: str
+) -> Optional[tuple[str, float, bool, bool, bool]]:
+    best: Optional[tuple[str, float, bool, bool, bool]] = None
+    matched_l = {c.lower() for c in matched}
+    for plat in req.alternatives or ["Azure", "AWS", "GCP"]:
+        if plat.lower() not in matched_l and not _contains_concept(snippet_text, plat.lower()):
+            continue
+        core_ok = _cloud_core_hit(req, matched, snippet_text, plat)
+        cap_ok = _cloud_capability_hit(req, matched, snippet_text, plat)
+        complete = core_ok and cap_ok
+        score = 0.86 if complete else min(max(PARTIAL_THRESHOLD, 0.50), STRONG_THRESHOLD - 0.01)
+        cand = (plat, score, complete, core_ok, cap_ok)
+        if best is None or (complete, score) > (best[2], best[1]):
+            best = cand
+    return best
+
+
+def _select_cloud_branch(
+    req: CanonicalRequirement, hits: list[EvidenceHit]
+) -> Optional[tuple[EvidenceHit, str, float, bool, bool, bool]]:
+    winner: Optional[tuple[EvidenceHit, str, float, bool, bool, bool]] = None
+    for hit in hits:
+        scored = _score_cloud_branches(req, hit.matched_concepts, hit.text)
+        if not scored:
+            continue
+        plat, score, complete, core_ok, cap_ok = scored
+        cand = (hit, plat, score, complete, core_ok, cap_ok)
+        if winner is None or (complete, score) > (winner[3], winner[2]):
+            winner = cand
+    return winner
 
 
 def _credential_phrase(text: str) -> str:
@@ -600,13 +623,30 @@ def _credential_phrase(text: str) -> str:
     return blob.strip()
 
 
+_CERT_METADATA = re.compile(
+    r"\b(credential id|cert(?:ificate)? id|candidate id|license(?: number| no)?|"
+    r"expires?|expiration|issued(?: on)?|id)\b[:\s-]*\S*.*$",
+    re.I,
+)
+
+
+def _strip_cert_metadata(text: str) -> str:
+    return _CERT_METADATA.sub("", normalize_text(text)).strip(" -")
+
+
 def _credential_match(required: str, resume_line: str) -> bool:
-    a, b = normalize_text(required), normalize_text(resume_line)
-    if not a or not b or len(a) < 8:
+    needed = normalize_text(required)
+    shown = _strip_cert_metadata(resume_line)
+    if not needed or not shown or len(needed) < 8:
         return False
-    if a in {"certified", "certification", "certificate"} or b in {"certified", "certification", "certificate"}:
+    if needed in {"certified", "certification", "certificate"}:
         return False
-    return a in b or b in a
+    if shown == needed:
+        return True
+    if shown.startswith(needed + " "):
+        rest = shown[len(needed):].strip()
+        return bool(re.fullmatch(r"(associate|professional|expert)", rest))
+    return False
 
 
 def _certification_claimed(req: CanonicalRequirement, retriever: "ResumeEvidenceRetriever") -> tuple[bool, str]:
@@ -789,37 +829,46 @@ def classify_requirement(req: CanonicalRequirement, retriever: ResumeEvidenceRet
             )
 
     matched_alternative = ""
+    branch_complete = True
+    score = retrieval.best_score
     if req.category == CATEGORY_CLOUD:
-        for alt in req.alternatives or ["Azure", "AWS", "GCP"]:
-            if alt.lower() in {c.lower() for c in retrieval.matched_concepts}:
-                matched_alternative = alt
-                break
+        selected = _select_cloud_branch(req, retrieval.hits)
+        if selected:
+            hit, matched_alternative, score, branch_complete, core_ok, cap_ok = selected
+            evidence_text = hit.text
+            evidence_ids = [hit.snippet_id]
+            evidence_texts = [hit.text]
+            extra["semantic_similarity"] = round(score, 3)
+            extra["matched_alternative"] = matched_alternative
+            dur_years, dur_ok = retriever._duration(req, [hit])
+            extra["duration_verified"] = dur_ok
+            if req.min_years:
+                duration_ok = bool(dur_ok) and duration_meets(req.min_years, dur_years)
+                missing = [m for m in missing if "years" not in normalize_text(m)]
+                if not duration_ok:
+                    if not dur_ok:
+                        missing.append(f"{req.min_years:g}+ years verified from the resume timeline")
+                    else:
+                        missing.append(
+                            f"{req.min_years:g}+ years (timeline shows about {dur_years:.1f} years)"
+                        )
         extra["matched_alternative"] = matched_alternative
-        if matched_alternative:
-            sibling = {"azure", "aws", "gcp"} - {matched_alternative.lower()}
-            missing = [
-                m for m in missing
-                if normalize_text(m) not in sibling and normalize_text(m) != matched_alternative.lower()
-            ]
+        sibling = {"azure", "aws", "gcp"} - {matched_alternative.lower()} if matched_alternative else set()
+        missing = [
+            m for m in missing
+            if normalize_text(m) not in sibling and normalize_text(m) != matched_alternative.lower()
+        ]
         cores = (req.alternative_concepts or {}).get(matched_alternative, []) if matched_alternative else []
         caps = (req.alternative_capabilities or {}).get(matched_alternative, []) if matched_alternative else []
-        core_ok = not cores or _cloud_core_hit(req, retrieval.matched_concepts, evidence_text)
-        cap_ok = not caps or _cloud_capability_hit(req, retrieval.matched_concepts, evidence_text)
-        branch_complete = bool(matched_alternative) and core_ok and cap_ok
         if matched_alternative and not branch_complete:
             for concept in (cores if not core_ok else []) + (caps if not cap_ok else []):
                 if concept not in missing:
                     missing.append(concept)
-    else:
-        branch_complete = True
 
-    score = retrieval.best_score
     category_ok = bool(retrieval.category_compatible)
     required_ok = True
     if req.category == CATEGORY_CLOUD:
-        required_ok = bool(matched_alternative) or bool(
-            set(retrieval.matched_concepts) & {"azure", "aws", "gcp"}
-        )
+        required_ok = bool(matched_alternative)
     elif req.technologies:
         required_ok = any(t in retrieval.matched_concepts for t in req.technologies[:3]) or bool(
             retrieval.matched_concepts

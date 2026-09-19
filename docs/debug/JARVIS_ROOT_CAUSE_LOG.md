@@ -8,7 +8,7 @@ Routing: [`ROUTING_PRECEDENCE.md`](ROUTING_PRECEDENCE.md)
 Shared thread: GitHub issue **JARVIS Root-Cause Debug Thread**
 
 Architecture-audit cadence: every 5–10 fixes. Last audit: none yet (bridge
-created 2026-09-18). Fixes logged below: 5.
+created 2026-09-18). Fixes logged below: 6.
 
 ---
 
@@ -38,6 +38,95 @@ REGRESSION TESTS:
 REMAINING RISKS:
 QUESTIONS FOR CHATGPT:
 ```
+
+---
+
+## 2026-09-18 — ChatGPT REVISE: branch-scoped evidence and strict credentials
+
+BUG:
+Issue comment 5739600526 reviewed `c87cb97` as REVISE. Cloud matching
+aggregated concepts across hits and picked the first alternative
+(Azure before AWS), so weak Azure + strong Bedrock could be labeled Azure
+while `_cloud_*_hit()` used any platform’s core/capability. Unknown
+credentials still allowed reverse substring matching (`b in a`), so
+“Databricks Certified” could COVER the full Associate title.
+
+EXPECTED:
+Each cloud branch is scored on one evidence hit. The highest complete
+branch wins, and stored evidence is that hit. Truncated credential names
+are not COVERED. Exact phrase plus harmless metadata (Credential ID) is.
+
+ACTUAL (c87cb97):
+`matched_alternative` walked `req.alternatives` against unioned concepts.
+Core/capability helpers looped every platform. `_credential_match` used
+`a in b or b in a`.
+
+REPRODUCTION:
+New tests: weak Azure + strong AWS; weak AWS + strong Azure; Foundry line
+plus unrelated agentic design notes; truncated Databricks; Databricks +
+Credential ID.
+
+RAW USER COMMAND:
+Read ChatGPT’s latest review in Issue #1, comment 5739600526. Fix the two
+remaining blockers.
+
+NORMALIZED COMMAND:
+Branch-scoped cloud selection; stricter unknown-credential matching.
+Do not run live Deloitte A–E.
+
+ROUTE:
+N/A (matching layer).
+
+INTENT:
+comparison / evidence classification.
+
+PLANNER ADMISSION:
+Unchanged.
+
+TOOLS / ACTIONS CALLED:
+None.
+
+ROOT CAUSE:
+Branch completeness was computed on aggregated hits, not per-hit
+per-platform. Credential identity used bidirectional substring inclusion.
+
+ALTERNATIVE HYPOTHESES:
+1. Retrieval ranking already preferred AWS but classify overwrote the label
+   (confirmed: first-alternative walk ignored hit scores).
+2. Certification parser extracted a short canonical name (rejected: the
+   unknown Databricks phrase is not in `_CERT_NAMES`; the leak was `b in a`).
+
+FILES / FUNCTIONS:
+`src/agent/phase6/evidence.py` (`_score_cloud_branches`, `_select_cloud_branch`,
+`_credential_match`)
+`tests/test_semantic_matching.py`
+
+FIX:
+Score Azure/AWS/GCP independently on each snippet. Select the best
+(complete, score) branch and bind that snippet as evidence. Credential
+match is equality after stripping metadata, plus a short official-level
+suffix; no reverse substring.
+
+AUTOMATED TESTS:
+PASS — count recorded on issue #1 after the run.
+
+LIVE TEST:
+NOT YET RUN — Deloitte 359035 A–E withheld.
+
+COMMIT SHA:
+Focused follow-up commit on this change set (full SHA on issue #1 after push).
+
+REGRESSION TESTS:
+Weak Azure + strong AWS; inverse; mixed-hit no cross-attribution;
+truncated unknown cert; unknown cert + Credential ID.
+
+REMAINING RISKS:
+Same-hit only; multi-line same-role cloud evidence is not merged.
+Capability lexicon is still closed.
+
+QUESTIONS FOR CHATGPT:
+Is same-hit branch binding enough, or must same-role multi-line evidence
+also be eligible before live Deloitte A–E?
 
 ---
 

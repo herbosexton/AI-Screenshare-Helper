@@ -782,3 +782,82 @@ def test_new_undated_role_after_completed_dated_role_resets():
     python = next(sn for sn in profile.snippets if "python" in sn.text.lower())
     assert workshop.start is not None
     assert python.start is None
+
+
+def test_weak_azure_plus_strong_aws_selects_aws_branch():
+    result = JobResumeComparisonEngine().compare(
+        page_text=DELOITTE_CLOUD_BRANCHES,
+        resume_text=(
+            "Experience\n"
+            "Used Azure Storage for logs.\n"
+            "Built agent orchestration on Amazon Bedrock for foundation-model evaluation.\n"
+        ),
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/weak-azure-strong-aws",
+    )
+    cloud = next(i for i in result.items if i.category == "cloud")
+    assert cloud.matched_alternative == "AWS"
+    assert "bedrock" in cloud.resume_evidence.lower()
+    assert "azure storage" not in cloud.resume_evidence.lower()
+    assert cloud.status == COVERED
+
+
+def test_weak_aws_plus_strong_azure_selects_azure_branch():
+    result = JobResumeComparisonEngine().compare(
+        page_text=DELOITTE_CLOUD_BRANCHES,
+        resume_text=(
+            "Experience\n"
+            "Used AWS for logs.\n"
+            "Designed and deployed agentic applications on Azure AI Foundry with tool orchestration.\n"
+        ),
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/weak-aws-strong-azure",
+    )
+    cloud = next(i for i in result.items if i.category == "cloud")
+    assert cloud.matched_alternative == "Azure"
+    assert "foundry" in cloud.resume_evidence.lower()
+    assert "amazon s3" not in cloud.resume_evidence.lower()
+    assert cloud.status == COVERED
+
+
+def test_cloud_does_not_mix_platform_and_capability_across_hits():
+    result = JobResumeComparisonEngine().compare(
+        page_text=DELOITTE_CLOUD_BRANCHES,
+        resume_text=(
+            "Experience\n"
+            "Used Azure AI Foundry for simple prompt experiments.\n"
+            "Wrote design notes about agentic orchestration.\n"
+        ),
+        job_title="Cloud Engineer",
+        job_url="https://jobs.example.com/mixed-hits",
+    )
+    cloud = next(i for i in result.items if i.category == "cloud")
+    assert cloud.status == PARTIAL
+    assert cloud.status != COVERED
+    assert cloud.matched_alternative == "Azure"
+    assert "foundry" in cloud.resume_evidence.lower()
+    assert "design notes" not in cloud.resume_evidence.lower()
+
+
+def test_truncated_unknown_credential_does_not_cover():
+    result = JobResumeComparisonEngine().compare(
+        page_text="Requirements:\n- Databricks Certified Generative AI Engineer Associate\n",
+        resume_text="Certifications\nDatabricks Certified\n",
+        job_title="Data Engineer",
+        job_url="https://jobs.example.com/cert-truncated",
+    )
+    cert = next(i for i in result.items if i.category == "certification" or "databricks" in i.requirement.lower())
+    assert cert.status in {NOT_FOUND, NEEDS_CONFIRMATION}
+    assert cert.status != COVERED
+
+
+def test_unknown_credential_with_metadata_suffix_covers():
+    result = JobResumeComparisonEngine().compare(
+        page_text="Requirements:\n- Databricks Certified Generative AI Engineer Associate\n",
+        resume_text="Certifications\nDatabricks Certified Generative AI Engineer Associate Credential ID 1234\n",
+        job_title="Data Engineer",
+        job_url="https://jobs.example.com/cert-metadata",
+    )
+    cert = next(i for i in result.items if i.category == "certification" or "databricks" in i.requirement.lower())
+    assert cert.status == COVERED
+    assert "databricks" in cert.resume_evidence.lower()
