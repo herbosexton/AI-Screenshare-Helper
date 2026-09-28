@@ -62,6 +62,11 @@ CONTROL_COMMANDS = {
     "what are you doing": "status",
     "what step are you on": "status",
     "status": "status",
+    "report that": "report",
+    "report this": "report",
+    "report that bug": "report",
+    "log that as a bug": "report",
+    "that was a bug": "report",
 }
 
 # Phase 7: approval voice phrases — only matched when a pending approval exists
@@ -99,6 +104,7 @@ def match_control_command(text: str) -> Optional[str]:
     """Map a short stop/pause/continue utterance. Do not steal those words from longer tasks."""
     n = " ".join((text or "").strip().lower().split())
     n = re.sub(r"[.!?]+$", "", n).strip()
+    n = re.sub(r"^(?:hey\s+)?jarvis[\s,]+(?=\S)", "", n).strip()
     if not n:
         return None
     if n in CONTROL_COMMANDS:
@@ -492,6 +498,13 @@ class AgentOrchestrator:
         return cleaned.strip()
 
     def handle_user_message(self, text: str, *, stt_confidence: float = 1.0) -> dict[str, Any]:
+        result = self._route_user_message(text, stt_confidence=stt_confidence)
+        selfheal = getattr(self, "selfheal", None)
+        if selfheal is not None:
+            selfheal.observe(text, result, result.get("perf") or {})
+        return result
+
+    def _route_user_message(self, text: str, *, stt_confidence: float = 1.0) -> dict[str, Any]:
         self._generation += 1
         gen = self._generation
         perf = PerfTrace(text)
@@ -1507,6 +1520,11 @@ class AgentOrchestrator:
             return None
 
     def _handle_control(self, action: str) -> dict[str, Any]:
+        if action == "report":
+            selfheal = getattr(self, "selfheal", None)
+            if selfheal is None:
+                return {"ok": False, "message": "Self-check logging is off.", "selfheal_report": True}
+            return selfheal.report_last()
         task = self.get_active_task()
         agent_task = self.agent_runner.active
         phase6 = self._phase6_active()

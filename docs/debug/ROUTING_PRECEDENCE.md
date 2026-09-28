@@ -10,7 +10,13 @@ same commit.
 ## Order
 
 1. **Phase 7 voice approval** — `_try_voice_approval(text)`
-2. **Control commands** — `match_control_command(text)` (emergency continue / stop)
+2. **Control commands** — `match_control_command(text)` (emergency continue / stop, and
+   "report that" which flags the previous turn as a self-heal incident). A leading
+   "Jarvis," address is stripped first; the rest must be an exact control phrase plus filler.
+
+After routing, `handle_user_message` passes the result to `SelfHealLoop.observe`
+(`src/agent/selfheal/`), which records the turn to `data/turns/` and runs deterministic
+checks. It never changes the route or the reply.
 3. **Filler discard** — `normalize_speech(text) in FILLERS`
 4. **Emergency-stop gate** — refuse work while engaged
 5. **Transcript normalization (fast-fact pass)** — `TranscriptNormalizer().normalize`

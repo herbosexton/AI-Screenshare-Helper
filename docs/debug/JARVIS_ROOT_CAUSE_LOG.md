@@ -41,6 +41,48 @@ QUESTIONS FOR CHATGPT:
 
 ---
 
+## 2026-09-28 — Self-heal loop: JARVIS detects its own wrong routes
+
+BUG:
+Live failures were only visible in the console. "what page am i on and open
+chatgbt in the tab" was split into 2 segments with actions
+`['current_page', 'open']` and PARTIAL_COVERAGE, and was then classified QUESTION /
+AI_CONVERSATION with planner NOT_ADMITTED. It was answered by the no-tools model, so
+nothing opened. Nothing recorded this or reported it.
+EXPECTED:
+Wrong decisions are captured automatically as incidents with the exact evidence, and
+a fixer can act on them under the debug-bridge protocol with user approval.
+ACTUAL:
+No turn persistence. No detection. Evidence was a screenshot.
+ROOT CAUSE (of the missing capability):
+Per-turn decisions (segments, actions, coverage, admission, path) existed only in
+`PerfTrace.meta` and printed logs, and were discarded after each reply.
+FIX:
+- `src/agent/selfheal/`: `TurnRecorder` (sanitized JSONL in gitignored `data/turns/`),
+  `FailureDetector` (deterministic rules: ACTION_ROUTED_TO_CONVERSATION,
+  COMPOUND_COMMAND_DROPPED, PLANNER_TASK_FAILED, plus USER_CORRECTION and
+  USER_REPORTED), `IncidentStore` (`data/incidents/<id>/incident.{json,md}`, deduped
+  by utterance and rules), and `SelfHealLoop` (observe, report, replay verification).
+- `handle_user_message` now wraps routing (`_route_user_message`) and calls
+  `observe` once per utterance. Routes and replies are unchanged.
+- Control command "report that" (optionally "Jarvis, ...") flags the previous turn.
+- `scripts/jarvis_fixer.py`: a local Cursor SDK agent in an isolated worktree and
+  branch `jarvis-fix/<id>`. The script reruns pytest itself. `approve` merges only
+  on a clean main tree, and `reject` discards the work. It never pushes.
+- Replaying an APPROVED incident's utterance marks it VERIFIED (LIVE PASS) or
+  REOPENED (LIVE FAIL).
+ALTERNATIVE HYPOTHESES: n/a (new capability).
+AUTOMATED TESTS: tests/test_selfheal.py 11 passed. The full suite has 2 failures in
+tests/test_perf_router.py that also fail with this change stashed (they read the
+live Chrome tab title).
+LIVE TEST: NOT YET RUN
+REMAINING RISKS:
+- The detector rules are heuristics over recorded labels; new routes need new rules.
+- The fixer needs CURSOR_API_KEY in `.env`.
+- The routing bug above is now the first open incident and is not fixed here.
+
+---
+
 ## 2026-09-18 — ChatGPT REVISE: branch-scoped evidence and strict credentials
 
 BUG:

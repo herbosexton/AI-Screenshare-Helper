@@ -145,6 +145,10 @@ def build_agent_stack(
     orchestrator.p7_approvals = p7_approvals  # type: ignore[attr-defined]
     orchestrator.p7_audit = p7_audit        # type: ignore[attr-defined]
     orchestrator.p7_context = p7_context    # type: ignore[attr-defined]
+    if agent_cfg.get("selfheal_enabled", True):
+        from src.agent.selfheal import SelfHealLoop
+
+        orchestrator.selfheal = SelfHealLoop(data_dir)  # type: ignore[attr-defined]
 
     tools = build_phase1_tools(
         screen_capture=screen_capture,
