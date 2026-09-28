@@ -22,6 +22,11 @@ class SelfHealLoop:
         self.recorder = TurnRecorder(data_dir / "turns")
         self.incidents = IncidentStore(data_dir / "incidents")
         self.detector = FailureDetector()
+        try:
+            self.recorder.root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print(f"[SelfHeal] cannot create {self.recorder.root}: {exc}")
+        print(f"[SelfHeal] recording turns to {self.recorder.root}")
 
     def observe(self, utterance: str, result: dict[str, Any], perf: dict[str, Any]) -> Optional[Incident]:
         try:
@@ -35,6 +40,10 @@ class SelfHealLoop:
             return None
         rec = self.recorder.record(build_record(utterance, result, perf))
         findings = self.detector.check(rec)
+        print(
+            f"[SelfHeal] turn path={rec.path or '-'} actions={rec.detected_actions} "
+            f"findings={[f.rule for f in findings]}"
+        )
         self._verify_approved(rec, findings)
 
         if is_user_correction(utterance):
