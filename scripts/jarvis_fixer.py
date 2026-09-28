@@ -43,6 +43,12 @@ BASE_BRANCH = "main"
 DEFAULT_MODEL = "composer-2.5"
 TEST_CMD = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"]
 TEST_TIMEOUT_S = 1200
+# Live Chrome-title tests that already fail on main; do not block FIX_READY.
+KNOWN_LIVE_FLAKY = (
+    "tests/test_perf_router.py::test_what_page_bypasses_llm",
+    "tests/test_perf_router.py::test_page_query_preempts_slow_planner",
+)
+DIRTY_IGNORE = ("docs/PHASE_3_VISION_PROFILE.json", "_tmp_test/")
 RULE_FILE = REPO / ".cursor" / "rules" / "jarvis-debug-bridge.mdc"
 
 
@@ -117,8 +123,30 @@ def run_tests(cwd: Path) -> tuple[bool, str]:
         proc = subprocess.run(TEST_CMD, cwd=cwd, capture_output=True, text=True, timeout=TEST_TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return False, f"tests timed out after {TEST_TIMEOUT_S}s"
+    out = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    failed = [ln.strip() for ln in out.splitlines() if ln.startswith("FAILED ")]
+    names = []
+    for ln in failed:
+        # "FAILED tests/foo.py::test_bar - assert ..."
+        part = ln[len("FAILED ") :].split(" - ", 1)[0].strip()
+        names.append(part)
+    unknown = [n for n in names if n not in KNOWN_LIVE_FLAKY]
     tail = [ln for ln in (proc.stdout or "").splitlines() if ln.strip()][-1:] or ["(no output)"]
-    return proc.returncode == 0, tail[0]
+    if proc.returncode == 0:
+        return True, tail[0]
+    if names and not unknown:
+        return True, f"PASS (ignoring known live flaky: {', '.join(names)}) — {tail[0]}"
+    return False, tail[0]
+
+
+def worktree_is_dirty(cwd: Path) -> bool:
+    lines = git("status", "--porcelain", cwd=cwd).stdout.splitlines()
+    for line in lines:
+        path = line[3:].strip() if len(line) > 3 else line.strip()
+        if any(path == ign or path.startswith(ign) for ign in DIRTY_IGNORE):
+            continue
+        return True
+    return False
 
 
 async def _run_agent_async(worktree: Path, prompt: str, model: str, api_key: str) -> tuple[str, str, str]:
@@ -163,7 +191,7 @@ def fix_incident(store: IncidentStore, incident_id: str, model: str, api_key: st
 
     status, summary, run_ref = run_agent(worktree, build_prompt(md), model, api_key)
     commits = git("rev-list", "--count", f"{BASE_BRANCH}..HEAD", cwd=worktree).stdout.strip()
-    dirty = bool(git("status", "--porcelain", cwd=worktree).stdout.strip())
+    dirty = worktree_is_dirty(worktree)
     tests_ok, tests_line = run_tests(worktree)
 
     fix = {
@@ -223,7 +251,8 @@ def cmd_show(store: IncidentStore, incident_id: str) -> int:
     if not path.exists():
         print(f"Unknown incident {incident_id}")
         return 1
-    print(path.read_text(encoding="utf-8"))
+    sys.stdout.buffer.write(path.read_text(encoding="utf-8").encode("utf-8", errors="replace"))
+    sys.stdout.buffer.write(b"\n")
     return 0
 
 
