@@ -17,6 +17,7 @@ Needs CURSOR_API_KEY in the environment or in .env. The key is never printed.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import subprocess
 import sys
@@ -55,7 +56,7 @@ def load_api_key() -> str:
         return key
     env_file = REPO / ".env"
     if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
+        for line in env_file.read_text(encoding="utf-8-sig").splitlines():
             name, _, value = line.partition("=")
             if name.strip() == "CURSOR_API_KEY":
                 return value.strip().strip('"').strip("'")
@@ -120,19 +121,29 @@ def run_tests(cwd: Path) -> tuple[bool, str]:
     return proc.returncode == 0, tail[0]
 
 
-def run_agent(worktree: Path, prompt: str, model: str, api_key: str) -> tuple[str, str, str]:
-    from cursor_sdk import Agent, CursorAgentError, LocalAgentOptions
+async def _run_agent_async(worktree: Path, prompt: str, model: str, api_key: str) -> tuple[str, str, str]:
+    from cursor_sdk import AsyncClient, LocalAgentOptions
 
-    try:
-        with Agent.create(model=model, api_key=api_key, local=LocalAgentOptions(cwd=str(worktree))) as agent:
-            run = agent.send(prompt)
+    async with await AsyncClient.launch_bridge(workspace=str(worktree)) as client:
+        async with await client.agents.create(
+            model=model, api_key=api_key, local=LocalAgentOptions(cwd=str(worktree))
+        ) as agent:
+            run = await agent.send(prompt)
             print(f"[Fixer] agent={agent.agent_id} run={run.id} started")
             chunks: list[str] = []
-            for text in run.iter_text():
+            async for text in run.iter_text():
                 chunks.append(text)
-            result = run.wait()
+            result = await run.wait()
             return str(result.status), "".join(chunks)[-4000:], f"{agent.agent_id}/{run.id}"
-    except CursorAgentError as exc:
+
+
+def run_agent(worktree: Path, prompt: str, model: str, api_key: str) -> tuple[str, str, str]:
+    # The sync SDK bridge launcher uses select() on a pipe, which Windows does not support.
+    from cursor_sdk import CursorAgentError, CursorSDKError
+
+    try:
+        return asyncio.run(_run_agent_async(worktree, prompt, model, api_key))
+    except (CursorAgentError, CursorSDKError) as exc:
         return "startup_error", f"{type(exc).__name__}: {exc}", ""
 
 
