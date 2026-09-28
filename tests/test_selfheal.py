@@ -43,10 +43,24 @@ def _rec(utterance=COMPOUND_UTTERANCE, result=None, perf=None):
     return build_record(utterance, dict(result or COMPOUND_TO_CHAT_RESULT), dict(perf or COMPOUND_TO_CHAT_PERF))
 
 
+def test_hud_may_not_short_circuit_compound_with_open():
+    from src.agent.selfheal.detector import hud_may_short_circuit
+
+    assert hud_may_short_circuit("what page am i on") is True
+    assert hud_may_short_circuit("what page am i on and open chatgbt in the tab") is False
+    assert hud_may_short_circuit("open chatgpt") is False
+
+
 def test_detector_flags_action_routed_to_no_tool_conversation():
     rules = {f.rule for f in FailureDetector().check(_rec())}
     assert ACTION_ROUTED_TO_CONVERSATION in rules
     assert COMPOUND_COMMAND_DROPPED in rules
+
+
+def test_detector_flags_action_on_hud_path():
+    perf = dict(COMPOUND_TO_CHAT_PERF, path="hud")
+    rules = {f.rule for f in FailureDetector().check(_rec(perf=perf))}
+    assert ACTION_ROUTED_TO_CONVERSATION in rules
 
 
 def test_detector_ignores_pure_question_on_conversation_path():

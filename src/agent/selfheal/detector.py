@@ -20,7 +20,7 @@ STATE_CHANGING_ACTIONS = frozenset({
     "switch_tab", "switch", "go", "compare", "search", "find", "find_file",
     "close", "click", "type", "press", "scroll", "start", "take",
 })
-_NO_TOOL_PATHS = frozenset({"ai_conversation"})
+_NO_TOOL_PATHS = frozenset({"ai_conversation", "hud"})
 _PLANNER_PATHS = frozenset({"planner"})
 _BENIGN_FAILURE_CODES = frozenset({
     "CAPTCHA_REQUIRED", "AUTHENTICATION_REQUIRED", "WAITING_FOR_APPROVAL",
@@ -46,6 +46,18 @@ class Finding:
 
 def is_user_correction(utterance: str) -> bool:
     return bool(_CORRECTION.search(utterance or ""))
+
+
+def hud_may_short_circuit(text: str) -> bool:
+    """HUD may answer alone only when the utterance has no tool-requiring work left."""
+    from src.agent.fast_coverage import analyze_fast_coverage
+
+    cov = analyze_fast_coverage(text or "")
+    if any(a in STATE_CHANGING_ACTIONS for a in cov.detected_actions):
+        return False
+    if cov.coverage == "PARTIAL_COVERAGE" and len(cov.command_segments) >= 2:
+        return False
+    return True
 
 
 class FailureDetector:

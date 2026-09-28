@@ -394,6 +394,7 @@ class JarvisWindow(QMainWindow):
         train_voice: Optional[Callable[[], dict]] = None,
         resume_voice: Optional[Callable[[], None]] = None,
         stop_speaking: Optional[Callable[[], None]] = None,
+        observe_local_reply: Optional[Callable[[str, str], None]] = None,
         config: Optional[dict] = None,
         parent=None,
     ):
@@ -405,6 +406,7 @@ class JarvisWindow(QMainWindow):
         self._train_voice = train_voice
         self._resume_voice = resume_voice
         self._stop_speaking = stop_speaking
+        self._observe_local_reply = observe_local_reply
         self._config = config or {}
         dash = (self._config.get("dashboard") or {})
         self._accent = dash.get("accent", "red")  # match SHIELD-style red by default
@@ -926,7 +928,18 @@ class JarvisWindow(QMainWindow):
 
         local = hud_spoken_reply(text, self._tasks, self._last_weather, stt_confidence=getattr(self, "_stt_confidence", 1.0))
         if local is not None:
+            from src.agent.selfheal.detector import hud_may_short_circuit
+
+            if not hud_may_short_circuit(text):
+                print(f"[Jarvis] HUD short-circuit skipped (compound/action): {text[:120]!r}")
+                local = None
+        if local is not None:
             print(f"[Jarvis] Local HUD reply: {local}")
+            if callable(self._observe_local_reply):
+                try:
+                    self._observe_local_reply(text, local)
+                except Exception as e:
+                    print(f"[SelfHeal] HUD observe skipped: {e}")
             self._rebuild_tasks()
             self._on_reply(local)
             self._stt_confidence = 1.0

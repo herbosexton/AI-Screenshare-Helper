@@ -98,6 +98,7 @@ class AppController:
                 train_voice=self.train_jarvis_voice,
                 resume_voice=self._resume_jarvis_voice,
                 stop_speaking=lambda: self.speech_out.stop_speaking() if self.speech_out else None,
+                observe_local_reply=self._observe_hud_reply,
                 config=self.config,
             )
             self.voice_commander = self._make_voice_commander()
@@ -238,6 +239,28 @@ class AppController:
                 self.monitor_window.show_answer(f"[Jarvis] {message}")
         print(f"[Jarvis] {message}")
         return result
+
+    def _observe_hud_reply(self, utterance: str, message: str) -> None:
+        """Record HUD short-circuit answers so SelfHeal still sees the turn."""
+        selfheal = getattr(self.agent, "selfheal", None) if self.agent is not None else None
+        if selfheal is None:
+            return
+        from src.agent.fast_coverage import analyze_fast_coverage
+
+        cov = analyze_fast_coverage(utterance)
+        selfheal.observe(
+            utterance,
+            {"ok": True, "message": message, "utterance_type": "HUD", "conceptual_route": "LOCAL_ACTION"},
+            {
+                "path": "hud",
+                "command_segments": list(cov.command_segments),
+                "detected_actions": list(cov.detected_actions),
+                "detected_domains": list(cov.detected_domains),
+                "coverage": cov.coverage,
+                "planner_admitted": False,
+                "planner_admission_reason": "HUD_SHORT_CIRCUIT",
+            },
+        )
 
     def emergency_stop(self):
         GLOBAL_EMERGENCY_STOP.engage("hotkey")
