@@ -1,58 +1,60 @@
-# Authorized Campaign Clip Bots
+# Content Rewards Clip System
 
-Clip bots for **contracted** streamer campaigns (e.g. paid GTA 6 creator campaigns).
+Clip system for **contracted** streamer campaigns when the payout surface is **Content Rewards** (no public API).
 
-This module creates clips through the **Twitch Helix Clip API**. It does not scrape or download other people's VODs.
+## How it works
 
-## Requirements
+1. Partners under contract provide authorized VODs/recordings (or you capture with their permission).
+2. Drop files into an inbox folder.
+3. The bot detects highlight windows, cuts clips, and exports **9:16 vertical** files + captions.
+4. You upload those clips manually in the Content Rewards portal.
+5. Mark each clip `submitted` / `paid` in the local tracker (CSV/JSONL).
 
-1. A written campaign / clip-rights agreement with each partner.
-2. A Twitch app (`TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET`).
-3. A **user access token** with `clips:edit` for each partner channel (you are the broadcaster, or an editor they added).
-4. Optional `TWITCH_REFRESH_TOKEN` for long-running monitors.
+Optional: Twitch Helix `twitch-run` if you also have editor/`clips:edit` on partner channels.
 
 ## Setup
 
 ```bash
 cp config/campaign_clips.example.yaml config/campaign_clips.yaml
-# Edit partners: twitch_login, contract_id, game name, rate limits
-```
-
-Environment:
-
-```bash
-export TWITCH_CLIENT_ID=...
-export TWITCH_CLIENT_SECRET=...
-export TWITCH_ACCESS_TOKEN=...
-export TWITCH_REFRESH_TOKEN=...   # optional
+mkdir -p data/campaign_clips/inbox/partner_streamer_one
+# Copy authorized recordings into that inbox
 ```
 
 ## Commands
 
 ```bash
-# Validate partner/campaign YAML
+# Validate config
 python -m campaign_clips --config config/campaign_clips.yaml validate-config
 
-# Run monitor (viewer-spike + game-match triggers)
-python -m campaign_clips --config config/campaign_clips.yaml run --max-polls 20
+# Process one authorized file
+python -m campaign_clips process \
+  --campaign gta6-launch-week \
+  --partner partner_streamer_one \
+  --source /path/to/authorized_vod.mp4
 
-# Also clip on a fixed cadence
-python -m campaign_clips run --interval-fallback --interval-every 15
+# Process a partner inbox folder
+python -m campaign_clips process \
+  --campaign gta6-launch-week \
+  --partner partner_streamer_one
 
-# Campaign report from stored clips
-python -m campaign_clips report --store data/campaign_clips/clips.jsonl
+# Tracker (manual Content Rewards statuses)
+python -m campaign_clips tracker list
+python -m campaign_clips tracker mark --clip-id ID --status submitted --url 'https://...'
+python -m campaign_clips tracker csv --out data/campaign_clips/content_rewards_tracker.csv
 ```
 
-## Behavior
+## Output package
 
-- Polls contracted partners for live streams.
-- Only clips when the stream game matches the campaign `game` field.
-- Default moment trigger: viewer-count spike between polls.
-- Enforces `max_clips_per_hour` per partner.
-- Appends each clip to a JSONL store for payout / reporting.
+For each source:
+
+- `horizontal/*.mp4` — landscape cuts
+- `vertical/*_9x16.mp4` — Content Rewards / Shorts-ready
+- `meta/*.json` — per-clip metadata
+- `captions.txt` — paste-friendly captions
+- `manifest.json` — full export manifest
 
 ## Not in scope
 
-- Downloading full streams/VODs without platform APIs
-- Clipping channels that are not in your contract config
-- Bypassing Twitch auth / editor permissions
+- Scraping or automating the Content Rewards website login/upload
+- Downloading streams/VODs you do not have rights to
+- Bypassing platform auth

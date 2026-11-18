@@ -59,6 +59,13 @@ def load_campaigns(path: str | Path) -> list[Campaign]:
                 hashtags=hashtags,
                 max_clips_per_hour=int(item.get("max_clips_per_hour") or 6),
                 enabled=bool(item.get("enabled", True)),
+                content_rewards_campaign=str(
+                    item.get("content_rewards_campaign") or item.get("name") or ""
+                ),
+                default_clip_duration_s=float(item.get("default_clip_duration_s") or 25),
+                max_clips_per_source=int(item.get("max_clips_per_source") or 8),
+                inbox_dir=str(item.get("inbox_dir") or ""),
+                export_dir=str(item.get("export_dir") or "data/campaign_clips/export"),
             )
         )
     return campaigns

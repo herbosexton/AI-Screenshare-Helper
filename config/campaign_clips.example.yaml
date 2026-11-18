@@ -1,23 +1,29 @@
-# Authorized campaign clip config.
-# Only list streamers you have a written contract / campaign agreement with,
-# and for whom your Twitch account has broadcaster or editor + clips:edit rights.
+# Authorized Content Rewards clip pipeline (no Content Rewards API).
+# Partners must be under contract / campaign agreement.
+# Drop authorized VODs/recordings into each partner inbox, then run `process`.
 
 campaigns:
   - id: gta6-launch-week
     name: GTA 6 Launch Week Creators
     game: "Grand Theft Auto VI"
     enabled: true
+    content_rewards_campaign: "GTA6 Content Rewards — Launch Week"
     clip_title_prefix: "GTA6 Campaign"
     hashtags:
       - GTA6
       - GTAVI
+      - ContentRewards
+    default_clip_duration_s: 25
+    max_clips_per_source: 8
     max_clips_per_hour: 4
+    inbox_dir: data/campaign_clips/inbox
+    export_dir: data/campaign_clips/export
     partners:
       - twitch_login: partner_streamer_one
         display_name: Partner One
         contract_id: CONTRACT-001
-        notes: "Paid highlight campaign — clip rights granted"
+        notes: "Paid Content Rewards campaign — clip rights granted"
       - twitch_login: partner_streamer_two
         display_name: Partner Two
         contract_id: CONTRACT-002
-        notes: "Paid highlight campaign — clip rights granted"
+        notes: "Paid Content Rewards campaign — clip rights granted"

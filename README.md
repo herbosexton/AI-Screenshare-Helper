@@ -62,9 +62,9 @@ Then type in the HUD: `Open https://example.com and tell me the heading`
 - **second_monitor** - Display on a non-shared monitor (safest)
 - **all** - All output methods simultaneously
 
-## Authorized campaign clips
+## Content Rewards clip system
 
-For contracted streamer campaigns (Twitch Helix Clip API, not scraping), see [`docs/CAMPAIGN_CLIPS.md`](docs/CAMPAIGN_CLIPS.md) and `python -m campaign_clips --help`.
+For contracted streamer campaigns paid via Content Rewards (no CR API — local VOD → vertical export + tracker), see [`docs/CAMPAIGN_CLIPS.md`](docs/CAMPAIGN_CLIPS.md) and `python -m campaign_clips --help`.
 
 ## Notes
 
