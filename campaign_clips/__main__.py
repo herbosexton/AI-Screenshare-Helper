@@ -6,20 +6,21 @@ import sys
 from pathlib import Path
 
 from campaign_clips.config import ConfigError, load_campaigns, twitch_credentials_from_env
+from campaign_clips.live import LiveCampaignWorker
 from campaign_clips.pipeline import find_campaign, find_partner, process_inbox, process_source
 from campaign_clips.portal import upload_campaign_to_sites
 from campaign_clips.portal_config import load_reward_sites
 from campaign_clips.store import ClipStore
 from campaign_clips.tracker import ContentRewardsTracker
+from campaign_clips.twitch_client import TwitchClient
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="campaign_clips",
         description=(
-            "Content Rewards clip system for contracted streamers. "
-            "Local VOD → highlights → vertical export, then a Playwright bot uploads "
-            "to the Content Rewards website (no public API). Optional Twitch Helix path kept."
+            "Rewards clip bots for contracted streamers: live Twitch monitoring + VOD inbox, "
+            "highlight cuts, then Playwright upload to Content Rewards and similar sites."
         ),
     )
     parser.add_argument(
@@ -103,16 +104,36 @@ def _build_parser() -> argparse.ArgumentParser:
         default="data/campaign_clips/content_rewards_tracker.csv",
     )
 
-    run_p = sub.add_parser(
-        "twitch-run",
-        help="Optional: poll live Twitch partners via Helix Clip API (requires clips:edit)",
+    live_p = sub.add_parser(
+        "live",
+        help="Watch contracted partners live, cut clips, enqueue rewards uploads",
     )
-    run_p.add_argument("--poll-interval", type=float, default=45.0)
-    run_p.add_argument("--max-polls", type=int, default=None)
-    run_p.add_argument("--interval-fallback", action="store_true")
-    run_p.add_argument("--interval-every", type=int, default=20)
+    live_p.add_argument("--poll-interval", type=float, default=45.0)
+    live_p.add_argument("--max-polls", type=int, default=None)
+    live_p.add_argument("--record-duration", type=float, default=None)
+    live_p.add_argument(
+        "--interval-every",
+        type=int,
+        default=8,
+        help="Also clip every N polls while live on the campaign game",
+    )
+    live_p.add_argument(
+        "--no-twitch-clip-api",
+        action="store_true",
+        help="Skip Helix create-clip; only record local live windows",
+    )
+    live_p.add_argument(
+        "--auto-upload",
+        action="store_true",
+        help="After each live clip batch, upload ready rows to configured reward sites",
+    )
+    live_p.add_argument(
+        "--headed",
+        action="store_true",
+        help="Show browser when --auto-upload is set",
+    )
 
-    sub.add_parser("twitch-report", help="Print optional Twitch clip store totals")
+    sub.add_parser("twitch-report", help="Print Twitch clip store totals")
 
     return parser
 
@@ -297,53 +318,77 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    if args.command == "twitch-run":
+    if args.command == "live":
         try:
             creds = twitch_credentials_from_env()
         except ConfigError as exc:
             print(str(exc), file=sys.stderr)
             return 2
 
-        from campaign_clips.clipper import CampaignClipper
-        from campaign_clips.monitor import CampaignMonitor
-        from campaign_clips.twitch_client import TwitchClient
+        tracker = ContentRewardsTracker(args.tracker)
+        registry = load_reward_sites(config_path)
 
-        store = ClipStore(args.store)
+        def on_event(event) -> None:  # type: ignore[no-untyped-def]
+            print(
+                f"[live] {event.campaign_id} @{event.partner_login} "
+                f"{event.method} {event.trigger} -> {event.clip_ids}"
+            )
+            if args.auto_upload:
+                try:
+                    campaign = find_campaign(campaigns, event.campaign_id)
+                    upload_results = upload_campaign_to_sites(
+                        campaign=campaign,
+                        registry=registry,
+                        tracker=tracker,
+                        headed=bool(args.headed),
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "auto_upload": True,
+                                "uploaded": sum(1 for r in upload_results if r.ok),
+                                "failed": sum(1 for r in upload_results if not r.ok),
+                            }
+                        )
+                    )
+                except Exception as exc:
+                    print(f"[live] auto-upload error: {exc}", file=sys.stderr)
+
+        def on_skip(reason: str) -> None:
+            print(f"[skip] {reason}")
+
+        def on_error(reason: str) -> None:
+            print(f"[error] {reason}", file=sys.stderr)
+
         with TwitchClient(
             client_id=creds["client_id"],
             client_secret=creds["client_secret"],
             access_token=creds["access_token"],
             refresh_token=creds.get("refresh_token"),
         ) as client:
-            clipper = CampaignClipper(client, store)
-
-            def on_clip(record):  # type: ignore[no-untyped-def]
-                print(
-                    f"[clip] {record.campaign_id} @{record.partner_login} "
-                    f"{record.clip_id} ({record.trigger}) {record.url}"
-                )
-
-            def on_skip(reason: str) -> None:
-                print(f"[skip] {reason}")
-
-            monitor = CampaignMonitor(
+            worker = LiveCampaignWorker(
                 campaigns,
-                clipper,
+                client,
+                tracker=tracker,
                 poll_interval_s=args.poll_interval,
+                record_duration_s=args.record_duration,
                 use_viewer_spike=True,
-                use_interval_fallback=bool(args.interval_fallback),
+                use_interval_fallback=True,
                 interval_every_n_polls=args.interval_every,
-                on_clip=on_clip,
+                prefer_twitch_clip_api=not args.no_twitch_clip_api,
+                on_event=on_event,
                 on_skip=on_skip,
+                on_error=on_error,
             )
-            stats = monitor.run(max_polls=args.max_polls)
+            stats = worker.run(max_polls=args.max_polls)
             print(
                 json.dumps(
                     {
                         "polls": stats.polls,
                         "live_sightings": stats.live_sightings,
-                        "clips_created": stats.clips_created,
+                        "clips_made": stats.clips_made,
                         "skipped": stats.skipped,
+                        "errors": stats.errors,
                     },
                     indent=2,
                 )

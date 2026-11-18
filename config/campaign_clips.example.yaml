@@ -1,5 +1,6 @@
 # Multi-site rewards clip + upload bots (Content Rewards and similar portals).
 # These sites usually have no API — Playwright drives each website for your campaign logins.
+# Live path: `python -m campaign_clips live` watches contracted Twitch partners and cuts clips.
 # Only list partners under contract / campaign agreement.
 
 reward_sites:

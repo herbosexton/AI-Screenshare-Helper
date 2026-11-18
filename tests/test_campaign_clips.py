@@ -530,3 +530,40 @@ def test_load_reward_sites(tmp_path: Path):
         {"CONTENT_REWARDS_EMAIL": "a@b.c", "CONTENT_REWARDS_PASSWORD": "x"}
     )
     assert creds["email"] == "a@b.c"
+
+
+def test_live_worker_records_and_tracks(tmp_path: Path):
+    from campaign_clips.live import LiveCampaignWorker
+
+    http = httpx.Client(transport=_FakeTransport())
+    client = TwitchClient("id", "secret", "token", http=http)
+    tracker = ContentRewardsTracker(tmp_path / "tracker.jsonl")
+    campaign = _campaign(
+        reward_site_ids=("content_rewards",),
+        default_clip_duration_s=4.0,
+        max_clips_per_source=1,
+    )
+
+    def fake_record(*, platform_url, dest, duration_s, **kwargs):
+        assert "twitch.tv/partner_one" in platform_url
+        return _make_test_video(Path(dest), seconds=max(3, int(duration_s)))
+
+    worker = LiveCampaignWorker(
+        [campaign],
+        client,
+        tracker=tracker,
+        out_root=tmp_path / "live",
+        export_root=tmp_path / "export",
+        use_viewer_spike=False,
+        use_interval_fallback=True,
+        interval_every_n_polls=1,
+        prefer_twitch_clip_api=True,
+        sleep_fn=lambda _s: None,
+        record_fn=fake_record,
+    )
+    events = worker.poll_once()
+    assert len(events) == 1
+    assert events[0].clip_ids
+    assert tracker.summarize()["total"] >= 1
+    assert Path(events[0].source_path).is_file()
+    client.close()

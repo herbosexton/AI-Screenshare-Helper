@@ -4,10 +4,11 @@ For contracted streamer campaigns paid through **Content Rewards and similar web
 
 Those portals usually have **no public API**, so the bot:
 
-1. Cuts clips from authorized partner VODs
-2. Logs into each configured rewards website with your campaign accounts
-3. Uploads vertical clips through each site’s UI (Playwright)
-4. Tracks per-site status: `ready` → `submitted` → `paid`
+1. Watches **live** contracted partners (Twitch) and/or processes authorized VODs
+2. Cuts highlight clips (local record window + optional Helix create-clip)
+3. Logs into each configured rewards website with your campaign accounts
+4. Uploads vertical clips through each site’s UI (Playwright)
+5. Tracks per-site status: `ready` → `submitted` → `paid`
 
 ## Setup
 
@@ -21,7 +22,12 @@ export CONTENT_REWARDS_PASSWORD='...'
 export CLIP_REWARDS_EMAIL='...'      # example second site
 export CLIP_REWARDS_PASSWORD='...'
 
-pip install playwright
+# Live Twitch monitoring (contracted partners; bot should be editor when using Helix clips)
+export TWITCH_CLIENT_ID='...'
+export TWITCH_CLIENT_SECRET='...'
+export TWITCH_ACCESS_TOKEN='...'     # user token with clips:edit when using Helix
+
+pip install playwright streamlink
 playwright install chromium
 ```
 
@@ -30,6 +36,11 @@ playwright install chromium
 ```bash
 python -m campaign_clips validate-config
 
+# LIVE — watch contracted partners, cut clips, queue uploads
+python -m campaign_clips live --max-polls 20
+python -m campaign_clips live --auto-upload --interval-every 6
+
+# VOD inbox fallback
 python -m campaign_clips process \
   --campaign gta6-launch-week \
   --partner partner_streamer_one \
