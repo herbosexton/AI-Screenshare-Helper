@@ -1,6 +1,24 @@
-# Authorized Content Rewards clip pipeline (no Content Rewards API).
+# Authorized Content Rewards clip + portal-upload bots.
 # Partners must be under contract / campaign agreement.
-# Drop authorized VODs/recordings into each partner inbox, then run `process`.
+# Content Rewards has no API — the bot drives the website with Playwright.
+
+portal:
+  base_url: https://YOUR-CONTENT-REWARDS-PORTAL.example
+  login_url: https://YOUR-CONTENT-REWARDS-PORTAL.example/login
+  # {campaign_slug} comes from each campaign's content_rewards_slug
+  upload_url_template: "{base_url}/campaigns/{campaign_slug}/upload"
+  headless: true
+  # Tune these selectors to match your portal's DOM:
+  selectors:
+    email: 'input[type="email"]'
+    password: 'input[type="password"]'
+    login_submit: 'button[type="submit"]'
+    file_input: 'input[type="file"]'
+    title: 'input[name="title"]'
+    caption: 'textarea[name="caption"]'
+    upload_submit: 'button[type="submit"]'
+    success: 'text=/success|submitted|uploaded/i'
+    post_url: 'a[href*="http"]'
 
 campaigns:
   - id: gta6-launch-week
@@ -8,6 +26,7 @@ campaigns:
     game: "Grand Theft Auto VI"
     enabled: true
     content_rewards_campaign: "GTA6 Content Rewards — Launch Week"
+    content_rewards_slug: gta6-launch-week
     clip_title_prefix: "GTA6 Campaign"
     hashtags:
       - GTA6

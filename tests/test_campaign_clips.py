@@ -38,6 +38,7 @@ def _campaign(**overrides):
         max_clips_per_hour=3,
         enabled=True,
         content_rewards_campaign="GTA6 Content Rewards",
+        content_rewards_slug="gta6-launch-week",
         default_clip_duration_s=5.0,
         max_clips_per_source=3,
     )
@@ -335,3 +336,108 @@ def test_export_accepts_manual_windows(tmp_path: Path):
     )
     assert len(exported) == 1
     assert exported[0].reason == "manual"
+
+
+class _FakeLocator:
+    def __init__(self, href: str = "https://contentrewards.example/p/1"):
+        self._href = href
+
+    @property
+    def first(self):
+        return self
+
+    def get_attribute(self, name: str):
+        return self._href if name == "href" else None
+
+
+class _FakePage:
+    def __init__(self):
+        self.actions: list[tuple] = []
+        self._url = "https://contentrewards.example/login"
+
+    def goto(self, url: str, **kwargs):
+        self._url = url
+        self.actions.append(("goto", url))
+
+    def fill(self, selector: str, value: str, **kwargs):
+        self.actions.append(("fill", selector, value))
+
+    def click(self, selector: str, **kwargs):
+        self.actions.append(("click", selector))
+
+    def set_input_files(self, selector: str, files, **kwargs):
+        self.actions.append(("files", selector, files))
+
+    def wait_for_selector(self, selector: str, **kwargs):
+        self.actions.append(("wait", selector, kwargs.get("state")))
+
+    def locator(self, selector: str):
+        return _FakeLocator()
+
+    def url(self) -> str:
+        return self._url
+
+
+def test_portal_upload_marks_tracker_submitted(tmp_path: Path):
+    from campaign_clips.portal import ContentRewardsPortal, upload_ready_clips
+    from campaign_clips.portal_config import PortalConfig, PortalSelectors
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake")
+    tracker = ContentRewardsTracker(tmp_path / "tracker.jsonl")
+    tracker.upsert_ready(
+        [
+            {
+                "clip_id": "clip-1",
+                "campaign_id": "gta6-launch-week",
+                "partner_login": "partner_one",
+                "contract_id": "C-1",
+                "content_rewards_campaign": "GTA6",
+                "title": "GTA6 clip",
+                "vertical_path": str(video),
+                "horizontal_path": "",
+            }
+        ]
+    )
+
+    page = _FakePage()
+    portal = ContentRewardsPortal(
+        PortalConfig(
+            base_url="https://contentrewards.example",
+            login_url="https://contentrewards.example/login",
+            upload_url_template="{base_url}/campaigns/{campaign_slug}/upload",
+            selectors=PortalSelectors(),
+        ),
+        email="bot@example.com",
+        password="secret",
+        page=page,
+    )
+    results = upload_ready_clips(
+        portal=portal,
+        tracker=tracker,
+        campaign_slug="gta6-launch-week",
+        login=True,
+    )
+    assert len(results) == 1
+    assert results[0].ok
+    assert tracker.load()[0].status == "submitted"
+    assert any(a[0] == "files" for a in page.actions)
+    assert any(a[0] == "fill" and "password" in a[1] for a in page.actions)
+
+
+def test_load_portal_config(tmp_path: Path):
+    from campaign_clips.portal_config import load_portal_config, portal_credentials_from_env
+
+    example = Path("config/campaign_clips.example.yaml")
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+    portal = load_portal_config(cfg)
+    assert portal is not None
+    assert "campaigns" in portal.upload_url("gta6-launch-week")
+
+    with pytest.raises(ConfigError):
+        portal_credentials_from_env({})
+    creds = portal_credentials_from_env(
+        {"CONTENT_REWARDS_EMAIL": "a@b.c", "CONTENT_REWARDS_PASSWORD": "x"}
+    )
+    assert creds["email"] == "a@b.c"

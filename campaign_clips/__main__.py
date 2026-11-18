@@ -7,6 +7,8 @@ from pathlib import Path
 
 from campaign_clips.config import ConfigError, load_campaigns, twitch_credentials_from_env
 from campaign_clips.pipeline import find_campaign, find_partner, process_inbox, process_source
+from campaign_clips.portal import ContentRewardsPortal, upload_ready_clips
+from campaign_clips.portal_config import load_portal_config, portal_credentials_from_env
 from campaign_clips.store import ClipStore
 from campaign_clips.tracker import ContentRewardsTracker
 
@@ -16,8 +18,8 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="campaign_clips",
         description=(
             "Content Rewards clip system for contracted streamers. "
-            "Primary path is local authorized VOD → highlights → vertical export + tracker "
-            "(Content Rewards has no API). Optional Twitch Helix clipping remains available."
+            "Local VOD → highlights → vertical export, then a Playwright bot uploads "
+            "to the Content Rewards website (no public API). Optional Twitch Helix path kept."
         ),
     )
     parser.add_argument(
@@ -59,7 +61,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip 9:16 export (horizontal only)",
     )
 
-    track_p = sub.add_parser("tracker", help="Content Rewards submission tracker (manual statuses)")
+    upload_p = sub.add_parser(
+        "upload",
+        help="Bot-login to Content Rewards and upload ready clips from the tracker",
+    )
+    upload_p.add_argument("--campaign", required=True, help="Campaign id from YAML")
+    upload_p.add_argument("--limit", type=int, default=None, help="Max clips to upload this run")
+    upload_p.add_argument(
+        "--headed",
+        action="store_true",
+        help="Show the browser window (useful when tuning selectors)",
+    )
+
+    track_p = sub.add_parser("tracker", help="Content Rewards submission tracker")
     track_sub = track_p.add_subparsers(dest="tracker_command", required=True)
     track_sub.add_parser("list", help="Show tracker summary")
     mark_p = track_sub.add_parser("mark", help="Update a clip status")
@@ -134,6 +148,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "validate-config":
         enabled = sum(1 for c in campaigns if c.enabled)
         partners = sum(len(c.partners) for c in campaigns)
+        try:
+            portal = load_portal_config(config_path)
+        except ConfigError as exc:
+            print(f"Config error: {exc}", file=sys.stderr)
+            return 2
         print(
             json.dumps(
                 {
@@ -141,12 +160,72 @@ def main(argv: list[str] | None = None) -> int:
                     "campaigns": len(campaigns),
                     "enabled_campaigns": enabled,
                     "partners": partners,
-                    "mode": "content_rewards_local_export",
+                    "portal_configured": portal is not None,
+                    "mode": "content_rewards_portal_bot",
                 },
                 indent=2,
             )
         )
         return 0
+
+    if args.command == "upload":
+        try:
+            campaign = find_campaign(campaigns, args.campaign)
+            portal_cfg = load_portal_config(config_path)
+            creds = portal_credentials_from_env()
+        except (KeyError, ConfigError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        if portal_cfg is None:
+            print(
+                "Config error: missing top-level 'portal' block "
+                "(base_url, login_url, upload_url_template).",
+                file=sys.stderr,
+            )
+            return 2
+
+        if args.headed:
+            from dataclasses import replace
+
+            portal_cfg = replace(portal_cfg, headless=False)
+
+        tracker = ContentRewardsTracker(args.tracker)
+        slug = campaign.content_rewards_slug or campaign.id
+        try:
+            with ContentRewardsPortal(
+                portal_cfg,
+                email=creds["email"],
+                password=creds["password"],
+            ) as portal:
+                results = upload_ready_clips(
+                    portal=portal,
+                    tracker=tracker,
+                    campaign_slug=slug,
+                    limit=args.limit,
+                )
+        except Exception as exc:
+            print(f"Upload error: {exc}", file=sys.stderr)
+            return 2
+
+        print(
+            json.dumps(
+                {
+                    "uploaded": sum(1 for r in results if r.ok),
+                    "failed": sum(1 for r in results if not r.ok),
+                    "results": [
+                        {
+                            "clip_id": r.clip_id,
+                            "ok": r.ok,
+                            "post_url": r.post_url,
+                            "error": r.error,
+                        }
+                        for r in results
+                    ],
+                },
+                indent=2,
+            )
+        )
+        return 0 if all(r.ok for r in results) or not results else 1
 
     if args.command == "process":
         try:
@@ -205,8 +284,8 @@ def main(argv: list[str] | None = None) -> int:
                         for r in results
                     ],
                     "next": (
-                        "Upload vertical/*.mp4 in the Content Rewards portal, "
-                        "then: python -m campaign_clips tracker mark --clip-id ID --status submitted"
+                        "python -m campaign_clips upload "
+                        f"--campaign {campaign.id}"
                     ),
                 },
                 indent=2,

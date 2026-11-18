@@ -1,60 +1,60 @@
-# Content Rewards Clip System
+# Content Rewards Clip + Portal Upload Bots
 
-Clip system for **contracted** streamer campaigns when the payout surface is **Content Rewards** (no public API).
+Clip system for **contracted** streamer campaigns paid through **Content Rewards**.
 
-## How it works
+Content Rewards has **no public API**, so the bot:
 
-1. Partners under contract provide authorized VODs/recordings (or you capture with their permission).
-2. Drop files into an inbox folder.
-3. The bot detects highlight windows, cuts clips, and exports **9:16 vertical** files + captions.
-4. You upload those clips manually in the Content Rewards portal.
-5. Mark each clip `submitted` / `paid` in the local tracker (CSV/JSONL).
-
-Optional: Twitch Helix `twitch-run` if you also have editor/`clips:edit` on partner channels.
+1. Cuts clips from authorized partner VODs
+2. **Logs into the Content Rewards website** with your campaign account
+3. **Uploads** the vertical clips through the portal UI (Playwright)
+4. Marks each clip `submitted` in the local tracker
 
 ## Setup
 
 ```bash
 cp config/campaign_clips.example.yaml config/campaign_clips.yaml
-mkdir -p data/campaign_clips/inbox/partner_streamer_one
-# Copy authorized recordings into that inbox
+# Fill in portal.base_url / login_url / upload_url_template + CSS selectors
+# Add contracted partners
+
+export CONTENT_REWARDS_EMAIL='your-campaign-login'
+export CONTENT_REWARDS_PASSWORD='...'
+
+pip install playwright
+playwright install chromium
 ```
 
 ## Commands
 
 ```bash
-# Validate config
-python -m campaign_clips --config config/campaign_clips.yaml validate-config
+python -m campaign_clips validate-config
 
-# Process one authorized file
+# Cut clips from an authorized VOD
 python -m campaign_clips process \
   --campaign gta6-launch-week \
   --partner partner_streamer_one \
   --source /path/to/authorized_vod.mp4
 
-# Process a partner inbox folder
-python -m campaign_clips process \
-  --campaign gta6-launch-week \
-  --partner partner_streamer_one
+# Bot uploads every tracker row still marked ready
+python -m campaign_clips upload --campaign gta6-launch-week
 
-# Tracker (manual Content Rewards statuses)
+# Debug selectors with a visible browser
+python -m campaign_clips upload --campaign gta6-launch-week --headed --limit 1
+
 python -m campaign_clips tracker list
-python -m campaign_clips tracker mark --clip-id ID --status submitted --url 'https://...'
-python -m campaign_clips tracker csv --out data/campaign_clips/content_rewards_tracker.csv
 ```
 
-## Output package
+## Portal selectors
 
-For each source:
+Each Content Rewards site has different HTML. Put the real CSS/text selectors under `portal.selectors` in your YAML. Use `--headed --limit 1` while tuning.
 
-- `horizontal/*.mp4` — landscape cuts
-- `vertical/*_9x16.mp4` — Content Rewards / Shorts-ready
-- `meta/*.json` — per-clip metadata
-- `captions.txt` — paste-friendly captions
-- `manifest.json` — full export manifest
+## Credentials
+
+Use env vars only (never commit passwords):
+
+- `CONTENT_REWARDS_EMAIL`
+- `CONTENT_REWARDS_PASSWORD`
 
 ## Not in scope
 
-- Scraping or automating the Content Rewards website login/upload
 - Downloading streams/VODs you do not have rights to
-- Bypassing platform auth
+- Bypassing CAPTCHA / 2FA / account security controls

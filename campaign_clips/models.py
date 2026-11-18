@@ -34,8 +34,9 @@ class Campaign:
     hashtags: tuple[str, ...] = ()
     max_clips_per_hour: int = 6
     enabled: bool = True
-    # Content Rewards (no public API) — human upload + local tracker.
+    # Content Rewards (no public API) — browser bot uploads + local tracker.
     content_rewards_campaign: str = ""
+    content_rewards_slug: str = ""
     default_clip_duration_s: float = 25.0
     max_clips_per_source: int = 8
     inbox_dir: str = ""

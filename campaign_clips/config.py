@@ -62,6 +62,11 @@ def load_campaigns(path: str | Path) -> list[Campaign]:
                 content_rewards_campaign=str(
                     item.get("content_rewards_campaign") or item.get("name") or ""
                 ),
+                content_rewards_slug=str(
+                    item.get("content_rewards_slug")
+                    or item.get("id")
+                    or ""
+                ),
                 default_clip_duration_s=float(item.get("default_clip_duration_s") or 25),
                 max_clips_per_source=int(item.get("max_clips_per_source") or 8),
                 inbox_dir=str(item.get("inbox_dir") or ""),
