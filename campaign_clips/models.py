@@ -34,13 +34,23 @@ class Campaign:
     hashtags: tuple[str, ...] = ()
     max_clips_per_hour: int = 6
     enabled: bool = True
-    # Content Rewards (no public API) — browser bot uploads + local tracker.
+    # Rewards portals (no public API) — browser bot uploads + local tracker.
     content_rewards_campaign: str = ""
     content_rewards_slug: str = ""
+    reward_site_ids: tuple[str, ...] = ("content_rewards",)
+    site_slugs: tuple[tuple[str, str], ...] = ()
     default_clip_duration_s: float = 25.0
     max_clips_per_source: int = 8
     inbox_dir: str = ""
     export_dir: str = "data/campaign_clips/export"
+
+    def slug_for_site(self, site_id: str) -> str:
+        for key, value in self.site_slugs:
+            if key == site_id:
+                return value
+        if site_id == "content_rewards" and self.content_rewards_slug:
+            return self.content_rewards_slug
+        return self.content_rewards_slug or self.id
 
 
 @dataclass

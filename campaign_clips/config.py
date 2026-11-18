@@ -67,6 +67,8 @@ def load_campaigns(path: str | Path) -> list[Campaign]:
                     or item.get("id")
                     or ""
                 ),
+                reward_site_ids=_reward_site_ids(item),
+                site_slugs=_site_slugs(item),
                 default_clip_duration_s=float(item.get("default_clip_duration_s") or 25),
                 max_clips_per_source=int(item.get("max_clips_per_source") or 8),
                 inbox_dir=str(item.get("inbox_dir") or ""),
@@ -74,6 +76,24 @@ def load_campaigns(path: str | Path) -> list[Campaign]:
             )
         )
     return campaigns
+
+
+def _reward_site_ids(item: dict) -> tuple[str, ...]:
+    raw = item.get("reward_sites")
+    if raw is None:
+        return ("content_rewards",)
+    if not isinstance(raw, list) or not raw:
+        raise ConfigError("campaign.reward_sites must be a non-empty list of site ids")
+    return tuple(str(x) for x in raw)
+
+
+def _site_slugs(item: dict) -> tuple[tuple[str, str], ...]:
+    raw = item.get("site_slugs") or {}
+    if not raw:
+        return ()
+    if not isinstance(raw, dict):
+        raise ConfigError("campaign.site_slugs must be a mapping of site_id → slug")
+    return tuple((str(k), str(v)) for k, v in raw.items())
 
 
 def twitch_credentials_from_env() -> dict[str, str]:

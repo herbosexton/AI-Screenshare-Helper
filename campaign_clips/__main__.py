@@ -7,8 +7,8 @@ from pathlib import Path
 
 from campaign_clips.config import ConfigError, load_campaigns, twitch_credentials_from_env
 from campaign_clips.pipeline import find_campaign, find_partner, process_inbox, process_source
-from campaign_clips.portal import ContentRewardsPortal, upload_ready_clips
-from campaign_clips.portal_config import load_portal_config, portal_credentials_from_env
+from campaign_clips.portal import upload_campaign_to_sites
+from campaign_clips.portal_config import load_reward_sites
 from campaign_clips.store import ClipStore
 from campaign_clips.tracker import ContentRewardsTracker
 
@@ -63,10 +63,21 @@ def _build_parser() -> argparse.ArgumentParser:
 
     upload_p = sub.add_parser(
         "upload",
-        help="Bot-login to Content Rewards and upload ready clips from the tracker",
+        help="Bot-login to configured rewards websites and upload ready clips",
     )
     upload_p.add_argument("--campaign", required=True, help="Campaign id from YAML")
-    upload_p.add_argument("--limit", type=int, default=None, help="Max clips to upload this run")
+    upload_p.add_argument(
+        "--site",
+        action="append",
+        default=None,
+        help="Reward site id to upload to (repeatable). Default: all sites on the campaign",
+    )
+    upload_p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Max clips to upload per site this run",
+    )
     upload_p.add_argument(
         "--headed",
         action="store_true",
@@ -78,6 +89,7 @@ def _build_parser() -> argparse.ArgumentParser:
     track_sub.add_parser("list", help="Show tracker summary")
     mark_p = track_sub.add_parser("mark", help="Update a clip status")
     mark_p.add_argument("--clip-id", required=True)
+    mark_p.add_argument("--site", default="content_rewards", help="Reward site id")
     mark_p.add_argument(
         "--status",
         required=True,
@@ -127,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
                 row = tracker.set_status(
                     args.clip_id,
                     args.status,
+                    site_id=args.site,
                     external_post_url=args.url,
                     notes=args.notes,
                 )
@@ -149,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
         enabled = sum(1 for c in campaigns if c.enabled)
         partners = sum(len(c.partners) for c in campaigns)
         try:
-            portal = load_portal_config(config_path)
+            registry = load_reward_sites(config_path)
         except ConfigError as exc:
             print(f"Config error: {exc}", file=sys.stderr)
             return 2
@@ -160,8 +173,8 @@ def main(argv: list[str] | None = None) -> int:
                     "campaigns": len(campaigns),
                     "enabled_campaigns": enabled,
                     "partners": partners,
-                    "portal_configured": portal is not None,
-                    "mode": "content_rewards_portal_bot",
+                    "reward_sites": registry.ids(),
+                    "mode": "multi_site_rewards_portal_bot",
                 },
                 indent=2,
             )
@@ -171,38 +184,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "upload":
         try:
             campaign = find_campaign(campaigns, args.campaign)
-            portal_cfg = load_portal_config(config_path)
-            creds = portal_credentials_from_env()
+            registry = load_reward_sites(config_path)
         except (KeyError, ConfigError) as exc:
             print(str(exc), file=sys.stderr)
             return 2
-        if portal_cfg is None:
+        if not registry.sites:
             print(
-                "Config error: missing top-level 'portal' block "
-                "(base_url, login_url, upload_url_template).",
+                "Config error: configure reward_sites: (or legacy portal:) "
+                "with base_url, login_url, upload_url_template.",
                 file=sys.stderr,
             )
             return 2
 
-        if args.headed:
-            from dataclasses import replace
-
-            portal_cfg = replace(portal_cfg, headless=False)
-
         tracker = ContentRewardsTracker(args.tracker)
-        slug = campaign.content_rewards_slug or campaign.id
         try:
-            with ContentRewardsPortal(
-                portal_cfg,
-                email=creds["email"],
-                password=creds["password"],
-            ) as portal:
-                results = upload_ready_clips(
-                    portal=portal,
-                    tracker=tracker,
-                    campaign_slug=slug,
-                    limit=args.limit,
-                )
+            results = upload_campaign_to_sites(
+                campaign=campaign,
+                registry=registry,
+                tracker=tracker,
+                site_ids=args.site,
+                limit_per_site=args.limit,
+                headed=bool(args.headed),
+            )
         except Exception as exc:
             print(f"Upload error: {exc}", file=sys.stderr)
             return 2
@@ -215,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
                     "results": [
                         {
                             "clip_id": r.clip_id,
+                            "site_id": r.site_id,
                             "ok": r.ok,
                             "post_url": r.post_url,
                             "error": r.error,

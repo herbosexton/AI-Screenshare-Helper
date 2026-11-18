@@ -62,9 +62,9 @@ Then type in the HUD: `Open https://example.com and tell me the heading`
 - **second_monitor** - Display on a non-shared monitor (safest)
 - **all** - All output methods simultaneously
 
-## Content Rewards clip system
+## Content Rewards / multi-site clip system
 
-For contracted streamer campaigns paid via Content Rewards (no CR API — local VOD → vertical export → Playwright portal upload bot), see [`docs/CAMPAIGN_CLIPS.md`](docs/CAMPAIGN_CLIPS.md) and `python -m campaign_clips --help`.
+For contracted streamer campaigns paid via Content Rewards and similar portals (no API — local VOD → vertical export → Playwright multi-site upload bots), see [`docs/CAMPAIGN_CLIPS.md`](docs/CAMPAIGN_CLIPS.md) and `python -m campaign_clips --help`.
 
 ## Notes
 

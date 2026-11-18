@@ -73,7 +73,14 @@ def process_source(
         make_vertical=make_vertical,
     )
     if tracker is not None:
-        tracker.upsert_ready([e.to_dict() for e in exported])
+        items = []
+        for exported_clip in exported:
+            base = exported_clip.to_dict()
+            for site_id in campaign.reward_site_ids:
+                row = dict(base)
+                row["site_id"] = site_id
+                items.append(row)
+        tracker.upsert_ready(items)
     return ProcessResult(
         source=str(src),
         campaign_id=campaign.id,

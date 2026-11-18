@@ -85,6 +85,7 @@ def test_load_campaigns_example(tmp_path: Path):
     campaigns = load_campaigns(path)
     assert len(campaigns) == 1
     assert campaigns[0].content_rewards_campaign.startswith("GTA6")
+    assert campaigns[0].reward_site_ids == ("content_rewards", "clip_rewards_network")
     assert campaigns[0].partners[0].normalized_login() == "partner_streamer_one"
 
 
@@ -278,6 +279,7 @@ def test_cli_validate_process_tracker(tmp_path: Path):
     data["campaigns"][0]["max_clips_per_source"] = 2
     data["campaigns"][0]["default_clip_duration_s"] = 4
     data["campaigns"][0]["export_dir"] = str(tmp_path / "export")
+    data["campaigns"][0]["reward_sites"] = ["content_rewards"]
     cfg.write_text(yaml.safe_dump(data), encoding="utf-8")
 
     video = _make_test_video(tmp_path / "in.mp4", seconds=9)
@@ -379,8 +381,8 @@ class _FakePage:
 
 
 def test_portal_upload_marks_tracker_submitted(tmp_path: Path):
-    from campaign_clips.portal import ContentRewardsPortal, upload_ready_clips
-    from campaign_clips.portal_config import PortalConfig, PortalSelectors
+    from campaign_clips.portal import RewardsPortalBot, upload_ready_clips
+    from campaign_clips.portal_config import PortalSelectors, RewardSite
 
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"fake")
@@ -396,13 +398,16 @@ def test_portal_upload_marks_tracker_submitted(tmp_path: Path):
                 "title": "GTA6 clip",
                 "vertical_path": str(video),
                 "horizontal_path": "",
+                "site_id": "content_rewards",
             }
         ]
     )
 
     page = _FakePage()
-    portal = ContentRewardsPortal(
-        PortalConfig(
+    portal = RewardsPortalBot(
+        RewardSite(
+            id="content_rewards",
+            display_name="Content Rewards",
             base_url="https://contentrewards.example",
             login_url="https://contentrewards.example/login",
             upload_url_template="{base_url}/campaigns/{campaign_slug}/upload",
@@ -416,24 +421,108 @@ def test_portal_upload_marks_tracker_submitted(tmp_path: Path):
         portal=portal,
         tracker=tracker,
         campaign_slug="gta6-launch-week",
+        site_id="content_rewards",
         login=True,
     )
     assert len(results) == 1
     assert results[0].ok
+    assert results[0].site_id == "content_rewards"
     assert tracker.load()[0].status == "submitted"
     assert any(a[0] == "files" for a in page.actions)
     assert any(a[0] == "fill" and "password" in a[1] for a in page.actions)
 
 
-def test_load_portal_config(tmp_path: Path):
-    from campaign_clips.portal_config import load_portal_config, portal_credentials_from_env
+def test_multi_site_upload_campaign(tmp_path: Path):
+    from campaign_clips.portal import RewardsPortalBot, upload_campaign_to_sites
+    from campaign_clips.portal_config import PortalSelectors, RewardSite, RewardSiteRegistry
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake")
+    tracker = ContentRewardsTracker(tmp_path / "tracker.jsonl")
+    for site_id in ("content_rewards", "clip_rewards_network"):
+        tracker.upsert_ready(
+            [
+                {
+                    "clip_id": "clip-1",
+                    "campaign_id": "gta6-launch-week",
+                    "partner_login": "partner_one",
+                    "contract_id": "C-1",
+                    "content_rewards_campaign": "GTA6",
+                    "title": "GTA6 clip",
+                    "vertical_path": str(video),
+                    "horizontal_path": "",
+                    "site_id": site_id,
+                }
+            ]
+        )
+
+    pages: dict[str, _FakePage] = {}
+
+    def factory(site, email, password):
+        page = _FakePage()
+        pages[site.id] = page
+        return RewardsPortalBot(site, email=email, password=password, page=page)
+
+    campaign = _campaign(
+        reward_site_ids=("content_rewards", "clip_rewards_network"),
+        site_slugs=(
+            ("content_rewards", "gta6-launch-week"),
+            ("clip_rewards_network", "gta6-launch"),
+        ),
+    )
+    registry = RewardSiteRegistry(
+        sites={
+            "content_rewards": RewardSite(
+                id="content_rewards",
+                display_name="CR",
+                base_url="https://cr.example",
+                login_url="https://cr.example/login",
+                upload_url_template="{base_url}/c/{campaign_slug}",
+                selectors=PortalSelectors(),
+                email_env="CONTENT_REWARDS_EMAIL",
+                password_env="CONTENT_REWARDS_PASSWORD",
+            ),
+            "clip_rewards_network": RewardSite(
+                id="clip_rewards_network",
+                display_name="CRN",
+                base_url="https://crn.example",
+                login_url="https://crn.example/login",
+                upload_url_template="{base_url}/r/{campaign_slug}",
+                selectors=PortalSelectors(),
+                email_env="CLIP_REWARDS_EMAIL",
+                password_env="CLIP_REWARDS_PASSWORD",
+            ),
+        }
+    )
+    env = {
+        "CONTENT_REWARDS_EMAIL": "a@b.c",
+        "CONTENT_REWARDS_PASSWORD": "x",
+        "CLIP_REWARDS_EMAIL": "d@e.f",
+        "CLIP_REWARDS_PASSWORD": "y",
+    }
+    results = upload_campaign_to_sites(
+        campaign=campaign,
+        registry=registry,
+        tracker=tracker,
+        env=env,
+        portal_factory=factory,
+    )
+    assert len(results) == 2
+    assert all(r.ok for r in results)
+    assert {r.site_id for r in results} == {"content_rewards", "clip_rewards_network"}
+    assert all(r.status == "submitted" for r in tracker.load())
+
+
+def test_load_reward_sites(tmp_path: Path):
+    from campaign_clips.portal_config import load_reward_sites, portal_credentials_from_env
 
     example = Path("config/campaign_clips.example.yaml")
     cfg = tmp_path / "c.yaml"
     cfg.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
-    portal = load_portal_config(cfg)
-    assert portal is not None
-    assert "campaigns" in portal.upload_url("gta6-launch-week")
+    registry = load_reward_sites(cfg)
+    assert "content_rewards" in registry.sites
+    assert "clip_rewards_network" in registry.sites
+    assert "campaigns" in registry.get("content_rewards").upload_url("gta6-launch-week")
 
     with pytest.raises(ConfigError):
         portal_credentials_from_env({})

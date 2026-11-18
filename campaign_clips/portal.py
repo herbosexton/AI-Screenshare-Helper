@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from campaign_clips.portal_config import PortalConfig
+from campaign_clips.models import Campaign
+from campaign_clips.portal_config import RewardSite, RewardSiteRegistry, site_credentials
 from campaign_clips.tracker import ContentRewardsTracker, TrackerRow
 
 
@@ -26,26 +27,28 @@ class BrowserPage(Protocol):
 class UploadResult:
     clip_id: str
     ok: bool
+    site_id: str = ""
     post_url: str = ""
     error: str = ""
 
 
-class ContentRewardsPortal:
-    """Automates Content Rewards portal login + clip upload via Playwright.
+class RewardsPortalBot:
+    """Automates login + clip upload for any configured rewards website.
 
-    Content Rewards exposes no API, so the bot drives the website for the
-    campaign account you control (contracted/paid campaigns only).
+    These portals typically have no public API, so the bot drives the website
+    for campaign accounts you control (contracted/paid campaigns only).
     """
 
     def __init__(
         self,
-        config: PortalConfig,
+        site: RewardSite,
         *,
         email: str,
         password: str,
         page: BrowserPage | None = None,
     ):
-        self.config = config
+        self.site = site
+        self.config = site  # alias used by older call sites
         self.email = email
         self.password = password
         self._page = page
@@ -54,7 +57,7 @@ class ContentRewardsPortal:
         self._context = None
         self._owns_browser = page is None
 
-    def __enter__(self) -> ContentRewardsPortal:
+    def __enter__(self) -> RewardsPortalBot:
         if self._page is None:
             self._start_browser()
         return self
@@ -67,18 +70,18 @@ class ContentRewardsPortal:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
             raise PortalError(
-                "playwright is required for Content Rewards portal automation. "
+                "playwright is required for rewards portal automation. "
                 "Install with: pip install playwright && playwright install chromium"
             ) from exc
 
         self._playwright = sync_playwright().start()
         self._browser = self._playwright.chromium.launch(
-            headless=self.config.headless,
-            slow_mo=self.config.slow_mo_ms,
+            headless=self.site.headless,
+            slow_mo=self.site.slow_mo_ms,
         )
         self._context = self._browser.new_context()
         self._page = self._context.new_page()
-        self._page.set_default_timeout(self.config.navigation_timeout_ms)
+        self._page.set_default_timeout(self.site.navigation_timeout_ms)
 
     @property
     def page(self) -> BrowserPage:
@@ -102,23 +105,22 @@ class ContentRewardsPortal:
 
     def login(self) -> None:
         page = self.page
-        sel = self.config.selectors
-        page.goto(self.config.login_url, wait_until="domcontentloaded")
+        sel = self.site.selectors
+        page.goto(self.site.login_url, wait_until="domcontentloaded")
         page.fill(sel.email, self.email)
         page.fill(sel.password, self.password)
         page.click(sel.login_submit)
-        # Portals differ after login; give the session cookies a moment to settle.
         try:
             page.wait_for_selector(sel.login_submit, state="detached", timeout=15_000)
         except Exception:
             pass
 
     def open_upload(self, campaign_slug: str) -> None:
-        url = self.config.upload_url(campaign_slug)
+        url = self.site.upload_url(campaign_slug)
         self.page.goto(url, wait_until="domcontentloaded")
         self.page.wait_for_selector(
-            self.config.selectors.file_input,
-            timeout=self.config.navigation_timeout_ms,
+            self.site.selectors.file_input,
+            timeout=self.site.navigation_timeout_ms,
         )
 
     def upload_clip(
@@ -132,16 +134,20 @@ class ContentRewardsPortal:
     ) -> UploadResult:
         path = Path(video_path)
         if not path.is_file():
-            return UploadResult(clip_id=path.stem, ok=False, error=f"missing file: {path}")
+            return UploadResult(
+                clip_id=path.stem,
+                ok=False,
+                site_id=self.site.id,
+                error=f"missing file: {path}",
+            )
 
-        sel = self.config.selectors
+        sel = self.site.selectors
         page = self.page
         try:
             if not already_on_upload_page:
                 self.open_upload(campaign_slug)
 
             page.set_input_files(sel.file_input, str(path))
-            # Title / caption fields are optional depending on portal layout.
             try:
                 page.fill(sel.title, title)
             except Exception:
@@ -152,7 +158,7 @@ class ContentRewardsPortal:
                 pass
 
             page.click(sel.upload_submit)
-            page.wait_for_selector(sel.success, timeout=self.config.upload_timeout_ms)
+            page.wait_for_selector(sel.success, timeout=self.site.upload_timeout_ms)
 
             post_url = ""
             try:
@@ -162,22 +168,48 @@ class ContentRewardsPortal:
             except Exception:
                 post_url = ""
 
-            return UploadResult(clip_id=path.stem, ok=True, post_url=post_url)
+            return UploadResult(
+                clip_id=path.stem,
+                ok=True,
+                site_id=self.site.id,
+                post_url=post_url,
+            )
         except Exception as exc:
-            return UploadResult(clip_id=path.stem, ok=False, error=str(exc))
+            return UploadResult(
+                clip_id=path.stem,
+                ok=False,
+                site_id=self.site.id,
+                error=str(exc),
+            )
+
+
+# Backward-compatible name
+ContentRewardsPortal = RewardsPortalBot
 
 
 def upload_ready_clips(
     *,
-    portal: ContentRewardsPortal,
+    portal: RewardsPortalBot,
     tracker: ContentRewardsTracker,
     campaign_slug: str,
+    site_id: str | None = None,
+    campaign_id: str | None = None,
     limit: int | None = None,
     prefer_vertical: bool = True,
     login: bool = True,
 ) -> list[UploadResult]:
-    """Upload tracker rows in `ready` status, then mark them submitted."""
-    ready = [r for r in tracker.load() if r.status == "ready"]
+    """Upload ready tracker rows for one site, then mark them submitted."""
+    resolved_site = site_id or portal.site.id
+    ready = tracker.ready_for_site(resolved_site, campaign_id=campaign_id)
+    if not ready:
+        # Legacy rows may omit site filtering nuances
+        ready = [
+            r
+            for r in tracker.load()
+            if r.status == "ready" and (r.site_id == resolved_site or not site_id)
+        ]
+        if campaign_id:
+            ready = [r for r in ready if r.campaign_id == campaign_id]
     if limit is not None:
         ready = ready[: max(0, limit)]
 
@@ -195,6 +227,7 @@ def upload_ready_clips(
                 UploadResult(
                     clip_id=row.clip_id,
                     ok=False,
+                    site_id=resolved_site,
                     error="no vertical/horizontal video path on tracker row",
                 )
             )
@@ -217,17 +250,57 @@ def upload_ready_clips(
             tracker.set_status(
                 row.clip_id,
                 "submitted",
+                site_id=row.site_id or resolved_site,
                 external_post_url=result.post_url,
-                notes="uploaded by Content Rewards portal bot",
+                notes=f"uploaded by rewards portal bot ({resolved_site})",
             )
         results.append(
             UploadResult(
                 clip_id=row.clip_id,
                 ok=result.ok,
+                site_id=resolved_site,
                 post_url=result.post_url,
                 error=result.error,
             )
         )
+    return results
+
+
+def upload_campaign_to_sites(
+    *,
+    campaign: Campaign,
+    registry: RewardSiteRegistry,
+    tracker: ContentRewardsTracker,
+    site_ids: list[str] | None = None,
+    limit_per_site: int | None = None,
+    headed: bool = False,
+    env: dict[str, str] | None = None,
+    portal_factory=None,
+) -> list[UploadResult]:
+    """Upload one campaign's ready clips to each configured rewards website."""
+    targets = list(site_ids) if site_ids else list(campaign.reward_site_ids)
+    results: list[UploadResult] = []
+    factory = portal_factory or (
+        lambda site, email, password: RewardsPortalBot(site, email=email, password=password)
+    )
+
+    for site_id in targets:
+        site = registry.get(site_id)
+        if headed:
+            site = replace(site, headless=False)
+        creds = site_credentials(site, env=env)
+        slug = campaign.slug_for_site(site_id)
+        with factory(site, creds["email"], creds["password"]) as portal:
+            batch = upload_ready_clips(
+                portal=portal,
+                tracker=tracker,
+                campaign_slug=slug,
+                site_id=site_id,
+                campaign_id=campaign.id,
+                limit=limit_per_site,
+                login=True,
+            )
+            results.extend(batch)
     return results
 
 
@@ -246,9 +319,6 @@ def _caption_from_sidecar(row: TrackerRow) -> str:
         if not candidate:
             continue
         meta = Path(candidate).resolve().parent.parent / "meta" / f"{row.clip_id}.json"
-        if not meta.is_file():
-            # export layout: out/vertical/x.mp4 and out/meta/x.json
-            meta = Path(candidate).resolve().parent.parent / "meta" / f"{row.clip_id}.json"
         if meta.is_file():
             import json
 

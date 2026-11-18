@@ -1,24 +1,47 @@
-# Authorized Content Rewards clip + portal-upload bots.
-# Partners must be under contract / campaign agreement.
-# Content Rewards has no API — the bot drives the website with Playwright.
+# Multi-site rewards clip + upload bots (Content Rewards and similar portals).
+# These sites usually have no API — Playwright drives each website for your campaign logins.
+# Only list partners under contract / campaign agreement.
 
-portal:
-  base_url: https://YOUR-CONTENT-REWARDS-PORTAL.example
-  login_url: https://YOUR-CONTENT-REWARDS-PORTAL.example/login
-  # {campaign_slug} comes from each campaign's content_rewards_slug
-  upload_url_template: "{base_url}/campaigns/{campaign_slug}/upload"
-  headless: true
-  # Tune these selectors to match your portal's DOM:
-  selectors:
-    email: 'input[type="email"]'
-    password: 'input[type="password"]'
-    login_submit: 'button[type="submit"]'
-    file_input: 'input[type="file"]'
-    title: 'input[name="title"]'
-    caption: 'textarea[name="caption"]'
-    upload_submit: 'button[type="submit"]'
-    success: 'text=/success|submitted|uploaded/i'
-    post_url: 'a[href*="http"]'
+reward_sites:
+  content_rewards:
+    display_name: Content Rewards
+    base_url: https://YOUR-CONTENT-REWARDS-PORTAL.example
+    login_url: https://YOUR-CONTENT-REWARDS-PORTAL.example/login
+    upload_url_template: "{base_url}/campaigns/{campaign_slug}/upload"
+    headless: true
+    credentials_env:
+      email: CONTENT_REWARDS_EMAIL
+      password: CONTENT_REWARDS_PASSWORD
+    selectors:
+      email: 'input[type="email"]'
+      password: 'input[type="password"]'
+      login_submit: 'button[type="submit"]'
+      file_input: 'input[type="file"]'
+      title: 'input[name="title"]'
+      caption: 'textarea[name="caption"]'
+      upload_submit: 'button[type="submit"]'
+      success: 'text=/success|submitted|uploaded/i'
+      post_url: 'a[href*="http"]'
+
+  # Add as many similar rewards websites as you get paid to run:
+  clip_rewards_network:
+    display_name: Clip Rewards Network
+    base_url: https://YOUR-OTHER-REWARDS-SITE.example
+    login_url: https://YOUR-OTHER-REWARDS-SITE.example/signin
+    upload_url_template: "{base_url}/rewards/{campaign_slug}/new"
+    credentials_env:
+      email: CLIP_REWARDS_EMAIL
+      password: CLIP_REWARDS_PASSWORD
+    selectors:
+      email: 'input[name="email"]'
+      password: 'input[name="password"]'
+      login_submit: 'button[type="submit"]'
+      file_input: 'input[type="file"]'
+      title: 'input[name="title"]'
+      caption: 'textarea[name="description"]'
+      upload_submit: 'button:has-text("Submit")'
+      success: 'text=/success|submitted|uploaded/i'
+      post_url: 'a[href*="http"]'
 
 campaigns:
   - id: gta6-launch-week
@@ -27,6 +50,13 @@ campaigns:
     enabled: true
     content_rewards_campaign: "GTA6 Content Rewards — Launch Week"
     content_rewards_slug: gta6-launch-week
+    # Upload the same clip package to every site listed here:
+    reward_sites:
+      - content_rewards
+      - clip_rewards_network
+    site_slugs:
+      content_rewards: gta6-launch-week
+      clip_rewards_network: gta6-launch
     clip_title_prefix: "GTA6 Campaign"
     hashtags:
       - GTA6
@@ -41,8 +71,8 @@ campaigns:
       - twitch_login: partner_streamer_one
         display_name: Partner One
         contract_id: CONTRACT-001
-        notes: "Paid Content Rewards campaign — clip rights granted"
+        notes: "Paid rewards campaign — clip rights granted"
       - twitch_login: partner_streamer_two
         display_name: Partner Two
         contract_id: CONTRACT-002
-        notes: "Paid Content Rewards campaign — clip rights granted"
+        notes: "Paid rewards campaign — clip rights granted"
