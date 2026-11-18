@@ -13,6 +13,7 @@ from campaign_clips.portal_config import load_reward_sites
 from campaign_clips.store import ClipStore
 from campaign_clips.tracker import ContentRewardsTracker
 from campaign_clips.twitch_client import TwitchClient
+from campaign_clips.youtube_client import YouTubeClient, youtube_credentials_from_env
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -319,8 +320,26 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "live":
+        needs_twitch = any(
+            "twitch" in p.enabled_platforms()
+            for c in campaigns
+            if c.enabled
+            for p in c.partners
+        )
+        needs_youtube = any(
+            "youtube" in p.enabled_platforms()
+            for c in campaigns
+            if c.enabled
+            for p in c.partners
+        )
+
+        twitch_creds = None
+        youtube_key = None
         try:
-            creds = twitch_credentials_from_env()
+            if needs_twitch:
+                twitch_creds = twitch_credentials_from_env()
+            if needs_youtube:
+                youtube_key = youtube_credentials_from_env()
         except ConfigError as exc:
             print(str(exc), file=sys.stderr)
             return 2
@@ -331,7 +350,7 @@ def main(argv: list[str] | None = None) -> int:
         def on_event(event) -> None:  # type: ignore[no-untyped-def]
             print(
                 f"[live] {event.campaign_id} @{event.partner_login} "
-                f"{event.method} {event.trigger} -> {event.clip_ids}"
+                f"{event.platform} {event.method} {event.trigger} -> {event.clip_ids}"
             )
             if args.auto_upload:
                 try:
@@ -360,16 +379,24 @@ def main(argv: list[str] | None = None) -> int:
         def on_error(reason: str) -> None:
             print(f"[error] {reason}", file=sys.stderr)
 
-        with TwitchClient(
-            client_id=creds["client_id"],
-            client_secret=creds["client_secret"],
-            access_token=creds["access_token"],
-            refresh_token=creds.get("refresh_token"),
-        ) as client:
+        twitch_client = None
+        youtube_client = None
+        try:
+            if twitch_creds:
+                twitch_client = TwitchClient(
+                    client_id=twitch_creds["client_id"],
+                    client_secret=twitch_creds["client_secret"],
+                    access_token=twitch_creds["access_token"],
+                    refresh_token=twitch_creds.get("refresh_token"),
+                )
+            if youtube_key:
+                youtube_client = YouTubeClient(youtube_key)
+
             worker = LiveCampaignWorker(
                 campaigns,
-                client,
                 tracker=tracker,
+                twitch=twitch_client,
+                youtube=youtube_client,
                 poll_interval_s=args.poll_interval,
                 record_duration_s=args.record_duration,
                 use_viewer_spike=True,
@@ -393,6 +420,11 @@ def main(argv: list[str] | None = None) -> int:
                     indent=2,
                 )
             )
+        finally:
+            if twitch_client is not None:
+                twitch_client.close()
+            if youtube_client is not None:
+                youtube_client.close()
         return 0
 
     parser.error(f"Unknown command: {args.command}")

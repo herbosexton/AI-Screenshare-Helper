@@ -38,13 +38,32 @@ def load_campaigns(path: str | Path) -> list[Campaign]:
         for j, p in enumerate(partners_raw):
             if not isinstance(p, dict):
                 raise ConfigError(f"{ctx}.partners[{j}] must be a mapping")
-            login = str(_require(p, "twitch_login", f"{ctx}.partners[{j}]"))
+            pctx = f"{ctx}.partners[{j}]"
+            twitch_login = str(p.get("twitch_login") or "").strip()
+            youtube_channel_id = str(p.get("youtube_channel_id") or "").strip()
+            youtube_handle = str(p.get("youtube_handle") or "").strip()
+            if not twitch_login and not youtube_channel_id and not youtube_handle:
+                raise ConfigError(
+                    f"{pctx} requires twitch_login and/or youtube_channel_id/youtube_handle"
+                )
+            platforms_raw = p.get("platforms") or []
+            if platforms_raw and not isinstance(platforms_raw, list):
+                raise ConfigError(f"{pctx}.platforms must be a list")
+            display = str(
+                p.get("display_name")
+                or twitch_login
+                or youtube_handle
+                or youtube_channel_id
+            )
             partners.append(
                 Partner(
-                    twitch_login=login,
-                    display_name=str(p.get("display_name") or login),
+                    twitch_login=twitch_login,
+                    youtube_channel_id=youtube_channel_id,
+                    youtube_handle=youtube_handle,
+                    display_name=display,
                     contract_id=str(p.get("contract_id") or ""),
                     notes=str(p.get("notes") or ""),
+                    platforms=tuple(str(x).lower() for x in platforms_raw),
                 )
             )
 

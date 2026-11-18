@@ -13,13 +13,33 @@ def utc_now_iso() -> str:
 class Partner:
     """A contracted streamer / creator in a paid campaign."""
 
-    twitch_login: str
+    twitch_login: str = ""
+    youtube_channel_id: str = ""
+    youtube_handle: str = ""
     display_name: str = ""
     contract_id: str = ""
     notes: str = ""
+    platforms: tuple[str, ...] = ()
 
     def normalized_login(self) -> str:
-        return self.twitch_login.strip().lstrip("@").lower()
+        """Stable filesystem / tracker key for this partner."""
+        if self.twitch_login.strip():
+            return self.twitch_login.strip().lstrip("@").lower()
+        if self.youtube_handle.strip():
+            return self.youtube_handle.strip().lstrip("@").lower()
+        if self.youtube_channel_id.strip():
+            return self.youtube_channel_id.strip()
+        return "partner"
+
+    def enabled_platforms(self) -> tuple[str, ...]:
+        if self.platforms:
+            return tuple(p.lower() for p in self.platforms)
+        out: list[str] = []
+        if self.twitch_login.strip():
+            out.append("twitch")
+        if self.youtube_channel_id.strip() or self.youtube_handle.strip():
+            out.append("youtube")
+        return tuple(out)
 
 
 @dataclass(frozen=True)
@@ -84,3 +104,6 @@ class StreamStatus:
     viewer_count: int
     started_at: str
     is_live: bool = True
+    platform: str = "twitch"
+    video_id: str = ""
+    watch_url: str = ""

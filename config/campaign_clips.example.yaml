@@ -1,6 +1,6 @@
 # Multi-site rewards clip + upload bots (Content Rewards and similar portals).
 # These sites usually have no API — Playwright drives each website for your campaign logins.
-# Live path: `python -m campaign_clips live` watches contracted Twitch partners and cuts clips.
+# Live path: `python -m campaign_clips live` watches contracted Twitch + YouTube partners.
 # Only list partners under contract / campaign agreement.
 
 reward_sites:
@@ -70,10 +70,15 @@ campaigns:
     export_dir: data/campaign_clips/export
     partners:
       - twitch_login: partner_streamer_one
+        youtube_handle: PartnerStreamerOne
+        youtube_channel_id: UCxxxxxxxxxxxxxxxxxxxxxx
+        platforms: [twitch, youtube]
         display_name: Partner One
         contract_id: CONTRACT-001
-        notes: "Paid rewards campaign — clip rights granted"
+        notes: "Paid rewards campaign — clip rights granted on Twitch + YouTube"
       - twitch_login: partner_streamer_two
+        youtube_handle: PartnerStreamerTwo
+        platforms: [twitch, youtube]
         display_name: Partner Two
         contract_id: CONTRACT-002
-        notes: "Paid rewards campaign — clip rights granted"
+        notes: "Paid rewards campaign — clip rights granted on Twitch + YouTube"

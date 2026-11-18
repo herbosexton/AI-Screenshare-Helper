@@ -43,12 +43,20 @@ class GameMatchTrigger:
         self.game_name = game_name.strip().lower()
 
     def evaluate(self, stream: StreamStatus) -> TriggerDecision:
-        current = (stream.game_name or "").strip().lower()
         if not self.game_name:
             return TriggerDecision(True, "no_game_filter")
-        if self.game_name in current or current in self.game_name:
-            return TriggerDecision(True, f"game_match:{stream.game_name}")
-        return TriggerDecision(False, f"game_mismatch:{stream.game_name}")
+        haystacks = [
+            (stream.game_name or "").strip().lower(),
+            (stream.title or "").strip().lower(),
+        ]
+        for current in haystacks:
+            if not current:
+                continue
+            if self.game_name in current or current in self.game_name:
+                return TriggerDecision(True, f"game_match:{current}")
+        return TriggerDecision(
+            False, f"game_mismatch:{stream.game_name or stream.title}"
+        )
 
 
 class IntervalTrigger:

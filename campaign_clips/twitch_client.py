@@ -138,9 +138,10 @@ class TwitchClient:
                 params=[("user_id", uid) for uid in chunk],
             )
             for row in data.get("data") or []:
+                login = str(row["user_login"]).lower()
                 status = StreamStatus(
                     user_id=str(row["user_id"]),
-                    user_login=str(row["user_login"]).lower(),
+                    user_login=login,
                     user_name=str(row.get("user_name") or row["user_login"]),
                     game_id=str(row.get("game_id") or ""),
                     game_name=str(row.get("game_name") or ""),
@@ -148,6 +149,8 @@ class TwitchClient:
                     viewer_count=int(row.get("viewer_count") or 0),
                     started_at=str(row.get("started_at") or ""),
                     is_live=True,
+                    platform="twitch",
+                    watch_url=f"https://www.twitch.tv/{login}",
                 )
                 out[status.user_id] = status
         return out

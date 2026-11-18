@@ -4,8 +4,8 @@ For contracted streamer campaigns paid through **Content Rewards and similar web
 
 Those portals usually have **no public API**, so the bot:
 
-1. Watches **live** contracted partners (Twitch) and/or processes authorized VODs
-2. Cuts highlight clips (local record window + optional Helix create-clip)
+1. Watches **live** contracted partners on **Twitch and/or YouTube**, and/or processes authorized VODs
+2. Cuts highlight clips (streamlink record window + optional Twitch Helix create-clip)
 3. Logs into each configured rewards website with your campaign accounts
 4. Uploads vertical clips through each site’s UI (Playwright)
 5. Tracks per-site status: `ready` → `submitted` → `paid`
@@ -22,10 +22,11 @@ export CONTENT_REWARDS_PASSWORD='...'
 export CLIP_REWARDS_EMAIL='...'      # example second site
 export CLIP_REWARDS_PASSWORD='...'
 
-# Live Twitch monitoring (contracted partners; bot should be editor when using Helix clips)
+# Live monitoring (contracted partners)
 export TWITCH_CLIENT_ID='...'
 export TWITCH_CLIENT_SECRET='...'
 export TWITCH_ACCESS_TOKEN='...'     # user token with clips:edit when using Helix
+export YOUTUBE_API_KEY='...'         # YouTube Data API v3 key for live checks
 
 pip install playwright streamlink
 playwright install chromium
@@ -36,7 +37,7 @@ playwright install chromium
 ```bash
 python -m campaign_clips validate-config
 
-# LIVE — watch contracted partners, cut clips, queue uploads
+# LIVE — watch Twitch + YouTube partners, cut clips, queue uploads
 python -m campaign_clips live --max-polls 20
 python -m campaign_clips live --auto-upload --interval-every 6
 

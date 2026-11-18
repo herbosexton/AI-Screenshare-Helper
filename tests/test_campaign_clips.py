@@ -550,8 +550,8 @@ def test_live_worker_records_and_tracks(tmp_path: Path):
 
     worker = LiveCampaignWorker(
         [campaign],
-        client,
         tracker=tracker,
+        twitch=client,
         out_root=tmp_path / "live",
         export_root=tmp_path / "export",
         use_viewer_spike=False,
@@ -563,7 +563,90 @@ def test_live_worker_records_and_tracks(tmp_path: Path):
     )
     events = worker.poll_once()
     assert len(events) == 1
+    assert events[0].platform == "twitch"
     assert events[0].clip_ids
     assert tracker.summarize()["total"] >= 1
     assert Path(events[0].source_path).is_file()
     client.close()
+
+
+class _YouTubeTransport(httpx.BaseTransport):
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/search"):
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": {"videoId": "livevid1"},
+                            "snippet": {
+                                "title": "Grand Theft Auto VI heist live",
+                                "channelTitle": "Partner One",
+                                "channelId": "UCpartnerone000000000001",
+                            },
+                        }
+                    ]
+                },
+            )
+        if path.endswith("/videos"):
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": "livevid1",
+                            "snippet": {"title": "Grand Theft Auto VI heist live"},
+                            "liveStreamingDetails": {
+                                "concurrentViewers": "180",
+                                "actualStartTime": "2026-11-18T12:00:00Z",
+                            },
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(404, json={"error": path})
+
+
+def test_live_worker_youtube(tmp_path: Path):
+    from campaign_clips.live import LiveCampaignWorker
+    from campaign_clips.youtube_client import YouTubeClient
+
+    yt = YouTubeClient("fake-key", http=httpx.Client(transport=_YouTubeTransport()))
+    tracker = ContentRewardsTracker(tmp_path / "tracker.jsonl")
+    partner = Partner(
+        youtube_channel_id="UCpartnerone000000000001",
+        youtube_handle="PartnerOne",
+        display_name="Partner One",
+        contract_id="C-1",
+        platforms=("youtube",),
+    )
+    campaign = _campaign(
+        partners=(partner,),
+        reward_site_ids=("content_rewards",),
+        default_clip_duration_s=4.0,
+        max_clips_per_source=1,
+    )
+
+    def fake_record(*, platform_url, dest, duration_s, **kwargs):
+        assert "youtube.com" in platform_url
+        return _make_test_video(Path(dest), seconds=max(3, int(duration_s)))
+
+    worker = LiveCampaignWorker(
+        [campaign],
+        tracker=tracker,
+        youtube=yt,
+        out_root=tmp_path / "live",
+        export_root=tmp_path / "export",
+        use_viewer_spike=False,
+        use_interval_fallback=True,
+        interval_every_n_polls=1,
+        prefer_twitch_clip_api=False,
+        sleep_fn=lambda _s: None,
+        record_fn=fake_record,
+    )
+    events = worker.poll_once()
+    assert len(events) == 1
+    assert events[0].platform == "youtube"
+    assert events[0].clip_ids
+    yt.close()
