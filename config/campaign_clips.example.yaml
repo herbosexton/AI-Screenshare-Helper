@@ -1,0 +1,84 @@
+# Multi-site rewards clip + upload bots (Content Rewards and similar portals).
+# These sites usually have no API — Playwright drives each website for your campaign logins.
+# Live path: `python -m campaign_clips live` watches contracted Twitch + YouTube partners.
+# Only list partners under contract / campaign agreement.
+
+reward_sites:
+  content_rewards:
+    display_name: Content Rewards
+    base_url: https://YOUR-CONTENT-REWARDS-PORTAL.example
+    login_url: https://YOUR-CONTENT-REWARDS-PORTAL.example/login
+    upload_url_template: "{base_url}/campaigns/{campaign_slug}/upload"
+    headless: true
+    credentials_env:
+      email: CONTENT_REWARDS_EMAIL
+      password: CONTENT_REWARDS_PASSWORD
+    selectors:
+      email: 'input[type="email"]'
+      password: 'input[type="password"]'
+      login_submit: 'button[type="submit"]'
+      file_input: 'input[type="file"]'
+      title: 'input[name="title"]'
+      caption: 'textarea[name="caption"]'
+      upload_submit: 'button[type="submit"]'
+      success: 'text=/success|submitted|uploaded/i'
+      post_url: 'a[href*="http"]'
+
+  # Add as many similar rewards websites as you get paid to run:
+  clip_rewards_network:
+    display_name: Clip Rewards Network
+    base_url: https://YOUR-OTHER-REWARDS-SITE.example
+    login_url: https://YOUR-OTHER-REWARDS-SITE.example/signin
+    upload_url_template: "{base_url}/rewards/{campaign_slug}/new"
+    credentials_env:
+      email: CLIP_REWARDS_EMAIL
+      password: CLIP_REWARDS_PASSWORD
+    selectors:
+      email: 'input[name="email"]'
+      password: 'input[name="password"]'
+      login_submit: 'button[type="submit"]'
+      file_input: 'input[type="file"]'
+      title: 'input[name="title"]'
+      caption: 'textarea[name="description"]'
+      upload_submit: 'button:has-text("Submit")'
+      success: 'text=/success|submitted|uploaded/i'
+      post_url: 'a[href*="http"]'
+
+campaigns:
+  - id: gta6-launch-week
+    name: GTA 6 Launch Week Creators
+    game: "Grand Theft Auto VI"
+    enabled: true
+    content_rewards_campaign: "GTA6 Content Rewards — Launch Week"
+    content_rewards_slug: gta6-launch-week
+    # Upload the same clip package to every site listed here:
+    reward_sites:
+      - content_rewards
+      - clip_rewards_network
+    site_slugs:
+      content_rewards: gta6-launch-week
+      clip_rewards_network: gta6-launch
+    clip_title_prefix: "GTA6 Campaign"
+    hashtags:
+      - GTA6
+      - GTAVI
+      - ContentRewards
+    default_clip_duration_s: 25
+    max_clips_per_source: 8
+    max_clips_per_hour: 4
+    inbox_dir: data/campaign_clips/inbox
+    export_dir: data/campaign_clips/export
+    partners:
+      - twitch_login: partner_streamer_one
+        youtube_handle: PartnerStreamerOne
+        youtube_channel_id: UCxxxxxxxxxxxxxxxxxxxxxx
+        platforms: [twitch, youtube]
+        display_name: Partner One
+        contract_id: CONTRACT-001
+        notes: "Paid rewards campaign — clip rights granted on Twitch + YouTube"
+      - twitch_login: partner_streamer_two
+        youtube_handle: PartnerStreamerTwo
+        platforms: [twitch, youtube]
+        display_name: Partner Two
+        contract_id: CONTRACT-002
+        notes: "Paid rewards campaign — clip rights granted on Twitch + YouTube"

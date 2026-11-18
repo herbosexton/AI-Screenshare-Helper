@@ -62,6 +62,10 @@ Then type in the HUD: `Open https://example.com and tell me the heading`
 - **second_monitor** - Display on a non-shared monitor (safest)
 - **all** - All output methods simultaneously
 
+## Content Rewards / multi-site clip system
+
+For contracted streamer campaigns paid via Content Rewards and similar portals (live Twitch/YouTube + VOD → vertical export → Playwright multi-site upload bots), see [`docs/CAMPAIGN_CLIPS.md`](docs/CAMPAIGN_CLIPS.md) and `python -m campaign_clips --help`.
+
 ## Notes
 
 - Audio transcription runs locally via faster-whisper (no data sent to cloud for transcription)

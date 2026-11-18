@@ -17,6 +17,7 @@ data/
 
 # Local config contains API keys — never commit
 config.local.yaml
+config/campaign_clips.yaml
 
 # Detached app logs from local runs
 logs/
