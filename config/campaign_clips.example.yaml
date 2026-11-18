@@ -1,0 +1,23 @@
+# Authorized campaign clip config.
+# Only list streamers you have a written contract / campaign agreement with,
+# and for whom your Twitch account has broadcaster or editor + clips:edit rights.
+
+campaigns:
+  - id: gta6-launch-week
+    name: GTA 6 Launch Week Creators
+    game: "Grand Theft Auto VI"
+    enabled: true
+    clip_title_prefix: "GTA6 Campaign"
+    hashtags:
+      - GTA6
+      - GTAVI
+    max_clips_per_hour: 4
+    partners:
+      - twitch_login: partner_streamer_one
+        display_name: Partner One
+        contract_id: CONTRACT-001
+        notes: "Paid highlight campaign — clip rights granted"
+      - twitch_login: partner_streamer_two
+        display_name: Partner Two
+        contract_id: CONTRACT-002
+        notes: "Paid highlight campaign — clip rights granted"

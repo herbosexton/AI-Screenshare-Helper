@@ -62,6 +62,10 @@ Then type in the HUD: `Open https://example.com and tell me the heading`
 - **second_monitor** - Display on a non-shared monitor (safest)
 - **all** - All output methods simultaneously
 
+## Authorized campaign clips
+
+For contracted streamer campaigns (Twitch Helix Clip API, not scraping), see [`docs/CAMPAIGN_CLIPS.md`](docs/CAMPAIGN_CLIPS.md) and `python -m campaign_clips --help`.
+
 ## Notes
 
 - Audio transcription runs locally via faster-whisper (no data sent to cloud for transcription)
